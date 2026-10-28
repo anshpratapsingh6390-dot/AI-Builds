@@ -1,0 +1,146 @@
+@import "tailwindcss";
+
+@theme {
+  --color-neutral-950: var(--neutral-950);
+  --color-neutral-925: var(--neutral-925);
+  --color-neutral-900: var(--neutral-900);
+  --color-neutral-850: var(--neutral-850);
+  --color-neutral-800: var(--neutral-800);
+  --color-neutral-750: var(--neutral-750);
+  --color-neutral-700: var(--neutral-700);
+  --color-neutral-600: var(--neutral-600);
+  --color-neutral-500: var(--neutral-500);
+  --color-neutral-400: var(--neutral-400);
+  --color-neutral-300: var(--neutral-300);
+  --color-neutral-200: var(--neutral-200);
+  --color-neutral-100: var(--neutral-100);
+  --color-neutral-50: var(--neutral-50);
+
+  --color-indigo-950: var(--indigo-950);
+  --color-indigo-900: var(--indigo-900);
+  --color-indigo-400: var(--indigo-400);
+  --color-indigo-300: var(--indigo-300);
+
+  --color-emerald-950: var(--emerald-950);
+  --color-emerald-400: var(--emerald-400);
+  --color-emerald-300: var(--emerald-300);
+
+  --color-amber-950: var(--amber-950);
+  --color-amber-400: var(--amber-400);
+  --color-amber-300: var(--amber-300);
+
+  --color-rose-950: var(--rose-950);
+  --color-rose-400: var(--rose-400);
+  --color-rose-300: var(--rose-300);
+}
+
+:root,
+html.light,
+html:not(.dark),
+[data-theme="light"] {
+  color-scheme: light;
+  --neutral-950: #f8fafc; /* Crisp slate-50 canvas background */
+  --neutral-925: #f1f5f9; /* Slate-100 sidebar / subtle wells */
+  --neutral-900: #ffffff; /* Card / panel / modal background: pure white */
+  --neutral-850: #f1f5f9; /* Hover surfaces / subtle input wells */
+  --neutral-800: #e2e8f0; /* Structural borders (slate-200) */
+  --neutral-750: #cbd5e1; /* Subtle border dividers */
+  --neutral-700: #cbd5e1; /* Active/hover borders */
+  --neutral-600: #94a3b8; /* Muted badges and secondary details */
+  --neutral-500: #64748b; /* Secondary icons, input placeholders */
+  --neutral-400: #475569; /* Subtext & meta info (WCAG AA > 4.5:1) */
+  --neutral-300: #334155; /* Body copy & labels */
+  --neutral-200: #1e293b; /* Strong text & titles */
+  --neutral-100: #0f172a; /* Main headings (slate-900, 18:1 contrast) */
+  --neutral-50: #020617;
+
+  /* Semantic color adjustments for light backgrounds */
+  --indigo-950: #eef2ff;
+  --indigo-900: #e0e7ff;
+  --indigo-400: #4f46e5;
+  --indigo-300: #4338ca;
+
+  --emerald-950: #ecfdf5;
+  --emerald-400: #059669;
+  --emerald-300: #047857;
+
+  --amber-950: #fffbeb;
+  --amber-400: #d97706;
+  --amber-300: #b45309;
+
+  --rose-950: #fff1f2;
+  --rose-400: #e11d48;
+  --rose-300: #be123c;
+}
+
+html.dark,
+[data-theme="dark"] {
+  color-scheme: dark;
+  --neutral-950: #09090b;
+  --neutral-925: #0e0e11;
+  --neutral-900: #18181b;
+  --neutral-850: #202024;
+  --neutral-800: #27272a;
+  --neutral-750: #323238;
+  --neutral-700: #3f3f46;
+  --neutral-600: #52525b;
+  --neutral-500: #71717a;
+  --neutral-400: #a1a1aa;
+  --neutral-300: #d4d4d8;
+  --neutral-200: #e4e4e7;
+  --neutral-100: #f4f4f5;
+  --neutral-50: #fafafa;
+
+  --indigo-950: #1e1b4b;
+  --indigo-900: #312e81;
+  --indigo-400: #818cf8;
+  --indigo-300: #a5b4fc;
+
+  --emerald-950: #022c22;
+  --emerald-400: #34d399;
+  --emerald-300: #6ee7b7;
+
+  --amber-950: #451a03;
+  --amber-400: #fbbf24;
+  --amber-300: #fcd34d;
+
+  --rose-950: #4c0519;
+  --rose-400: #fb7185;
+  --rose-300: #fda4af;
+}
+
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* Custom scrollbars that adapt to light and dark theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-neutral-700, #cbd5e1);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-neutral-600, #94a3b8);
+}
+
+/* Subtle card elevation in light theme for pristine visual hierarchy */
+html.light .rounded-2xl.border,
+html.light .rounded-xl.border,
+html:not(.dark) .rounded-2xl.border,
+html:not(.dark) .rounded-xl.border {
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.04), 0 1px 2px -1px rgb(0 0 0 / 0.03);
+}
+
+html.dark .rounded-2xl.border,
+html.dark .rounded-xl.border {
+  box-shadow: none;
+}

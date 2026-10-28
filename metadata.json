@@ -1,0 +1,8 @@
+{
+  "name": "WOLI OS",
+  "description": "Personal Productivity, Habit Tracking, Time Management & Goal Intelligence Platform",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

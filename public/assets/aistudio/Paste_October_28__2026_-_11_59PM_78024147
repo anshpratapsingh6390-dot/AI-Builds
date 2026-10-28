@@ -1,0 +1,1674 @@
+# MASTER BUILD PROMPT: LIFE OS
+
+## Personal Productivity, Habit Tracking, Time Management & Goal Intelligence Platform
+
+### ROLE AND RESPONSIBILITY
+
+Act as a senior full-stack software engineer, product architect, UI/UX designer, database engineer, data analyst, and quality assurance engineer.
+
+Your task is to design and build a complete, production-quality personal productivity web application named "LIFE OS".
+
+This must be a real, functional application, not a static UI mockup, visual prototype, landing page, or collection of disconnected screens.
+
+Build the actual application with working interactions, functional buttons, persistent storage, data calculations, analytics, and a coherent information architecture.
+
+The user must be able to run the application locally on their own computer and use it as a personal productivity system for multiple years.
+
+Do not stop after generating the interface. Implement the application logic and data persistence as well.
+
+Do not merely provide a plan, architecture document, or pseudocode. Build the application.
+
+If a feature is too complex to implement completely in the initial pass, prioritize a reliable, functional core implementation and preserve a clear architecture for extending it.
+
+Do not ask unnecessary clarification questions. Use the product decisions and sensible defaults specified below.
+
+---
+
+# PART 1: PRODUCT VISION
+
+Build LIFE OS as a unified personal productivity operating system.
+
+The application combines:
+
+1. Habit Tracker
+2. Daily Planner
+3. To-Do List and Task Manager
+4. Planned vs Actual Time Tracker
+5. Weekly, Monthly, Six-Month, and Yearly Goal Management
+6. Daily, Weekly, Monthly, and Yearly Performance Analytics
+7. Calendar and Historical Records
+8. Long-Term Productivity Reports
+
+The central purpose is to help the user answer these questions:
+
+* What did I plan to do?
+* What did I actually do?
+* How much time did I plan to spend?
+* How much time did I actually spend?
+* Which habits did I complete?
+* Which tasks did I leave unfinished?
+* Why did I fail to achieve my targets?
+* How consistent am I over time?
+* Am I progressing toward my weekly, monthly, and yearly goals?
+* How has my productivity changed compared with previous periods?
+* What should I improve tomorrow, next week, or next month?
+
+The application must minimize manual data entry.
+
+Whenever a user completes a task, records time, or updates a goal, automatically update all relevant metrics and dashboards.
+
+Never require the user to enter the same information repeatedly when it can be derived from existing records.
+
+## Core principle
+
+ONE SOURCE OF TRUTH.
+
+Tasks, habits, time logs, schedules, and goals must be interconnected through a consistent data model.
+
+For example:
+
+A DSA study session may be linked to:
+
+* A scheduled calendar block
+* A task
+* A DSA habit
+* A monthly study-hours goal
+* A yearly learning goal
+
+Completing the session should update the appropriate records and analytics without duplicate manual entry.
+
+---
+
+# PART 2: TECHNOLOGY AND ARCHITECTURE
+
+Build a locally runnable web application.
+
+Preferred stack:
+
+Frontend:
+
+* React
+* TypeScript
+* Vite
+* Tailwind CSS
+* A consistent component library or reusable custom components
+* Lucide icons
+* Recharts or another suitable charting library
+
+Data and persistence:
+
+* IndexedDB for structured local data
+* A reliable IndexedDB wrapper such as Dexie.js, if appropriate
+* Local storage only for lightweight preferences such as theme and sidebar state
+
+Architecture:
+
+* Component-based frontend
+* Typed data models
+* Reusable hooks and services
+* Centralized data access layer
+* Centralized date and time utilities
+* Centralized analytics calculation functions
+* Validation for user input
+* Clear separation between presentation, business logic, and persistence
+
+The application must work locally without requiring:
+
+* A paid subscription
+* A cloud database
+* A mandatory online account
+* A continuously running remote server
+* An external AI API key
+
+Do not make Gemini API calls or other paid API calls necessary for core functionality.
+
+The initial application must work offline after dependencies have been installed and the application has been built.
+
+Use local-first architecture.
+
+## Mandatory persistence requirements
+
+1. Save all essential user data to IndexedDB.
+2. Data must survive page refreshes, browser restarts, and computer restarts.
+3. Do not store essential application data exclusively in React state.
+4. Do not store large or unlimited historical records exclusively in localStorage.
+5. Load saved records when the application starts.
+6. Update the interface immediately after successful data changes.
+7. Handle storage errors gracefully.
+8. Provide export and restore functionality.
+9. Avoid overwriting existing user data during application initialization.
+10. Include database schema versioning and safe migrations where practical.
+
+The application must not depend on a temporary development environment to retain user data.
+
+Provide a clear README explaining how to run the application locally.
+
+Use standard local development commands, such as:
+
+npm install
+npm run dev
+
+Ensure the project includes the required package.json and configuration files.
+
+The final project should be buildable using npm run build.
+
+If the development environment supports file creation, create the actual project files. If it supports live previews, provide a working preview.
+
+Do not claim that the application has been tested or built successfully unless you have actually verified it.
+
+---
+
+# PART 3: APPLICATION LAYOUT AND NAVIGATION
+
+Create a polished desktop-first application that also works well on tablets and mobile devices.
+
+Use a persistent left sidebar on desktop and a suitable responsive navigation pattern on smaller screens.
+
+The sidebar should contain:
+
+1. Dashboard
+2. Daily Planner
+3. Tasks
+4. Habits
+5. Time Tracker
+6. Goals
+7. Calendar
+8. Analytics
+9. History
+10. Data & Settings
+
+Include a global date selector where appropriate.
+
+The application header should contain:
+
+* Current date
+* Quick-add button
+* Search
+* Notifications or reminders, if implemented
+* Theme toggle
+* User preferences
+
+The quick-add button should allow the user to create a task, habit, goal, or time entry without navigating through multiple screens.
+
+Use consistent navigation, spacing, typography, icons, empty states, tooltips, and feedback messages.
+
+Every navigation item must open a real, functional screen.
+
+Do not create dead links or decorative buttons that do nothing.
+
+---
+
+# PART 4: DASHBOARD
+
+The dashboard is the main overview of the user's productivity.
+
+It must summarize today's performance and provide access to the most important actions.
+
+## A. Today's overview
+
+Display:
+
+* Today's date
+* Day of the week
+* Tasks planned
+* Tasks completed
+* Tasks remaining
+* Overdue tasks
+* Habits completed
+* Total active habits
+* Planned working hours
+* Actual working hours
+* Schedule adherence percentage
+* Today's goal progress
+* Current productivity score
+
+Use clear cards with labels, numerical values, progress indicators, and appropriate visual hierarchy.
+
+## B. Today's schedule
+
+Show the user's scheduled activities in chronological order.
+
+Each activity should display:
+
+* Start time
+* End time
+* Task or activity title
+* Category
+* Priority
+* Planned duration
+* Actual duration, if recorded
+* Status
+
+Allow users to mark tasks complete, start a timer, edit a task, or reschedule an activity.
+
+## C. Habit overview
+
+Display today's habits with:
+
+* Completion status
+* Quick completion control
+* Current streak
+* Weekly consistency
+* Habit category
+
+## D. Goal overview
+
+Display active weekly, monthly, and yearly goals with:
+
+* Target
+* Current progress
+* Remaining amount
+* Deadline
+* Percentage completed
+
+## E. Productivity insights
+
+Generate transparent, rule-based insights from actual saved data.
+
+Examples:
+
+* "You completed 7 of your 9 planned tasks today."
+* "You planned 4 hours of study and recorded 3 hours."
+* "Your habit completion rate this week is 78%."
+* "You have 6 study hours remaining to reach your weekly target."
+* "You completed fewer tasks than your previous seven-day average."
+
+Only display insights supported by actual records.
+
+Do not invent productivity explanations or claim that a specific event caused poor performance unless the user recorded that information.
+
+## F. Quick actions
+
+Provide:
+
+* Add task
+* Add habit
+* Add goal
+* Start time tracker
+* Mark habit complete
+* Review today's performance
+
+The dashboard must remain useful even when the user has no historical data.
+
+Display a clear onboarding or empty state instead of misleading zeros or fabricated achievements.
+
+---
+
+# PART 5: DAILY PLANNER
+
+Build a complete daily scheduling system.
+
+The user must be able to create a detailed schedule for any date.
+
+## A. Time-based planning
+
+Support:
+
+* 24-hour clock
+* Configurable day start and end
+* Time slots of 15, 30, or 60 minutes
+* Custom task durations
+* Scheduled breaks
+* Flexible, unscheduled tasks
+* Overlapping schedule detection
+* Rescheduling
+* Recurring schedule templates
+
+The default day can run from 06:00 to 23:00, but the user must be able to change it.
+
+Display the schedule as a chronological timeline.
+
+If practical, provide both timeline and agenda views.
+
+## B. Schedule creation
+
+Every scheduled activity should support:
+
+* Title
+* Description
+* Date
+* Start time
+* End time
+* Category
+* Priority
+* Estimated duration
+* Linked task, if applicable
+* Linked habit, if applicable
+* Linked goal, if applicable
+* Notes
+* Status
+
+Calculate duration automatically from the start and end times.
+
+Warn the user when scheduled activities overlap.
+
+Do not silently overwrite another scheduled activity.
+
+## C. Planned versus actual time
+
+For each activity, track:
+
+* Planned start
+* Planned end
+* Planned duration
+* Actual start
+* Actual end
+* Actual duration
+* Time variance
+* Completion status
+
+Calculate:
+
+Time variance = Actual duration - Planned duration
+
+A positive value means more time was spent than planned.
+
+A negative value means less time was spent than planned.
+
+Allow the user to record actual duration manually if a timer was not used.
+
+## D. Daily planning workflow
+
+Support the following workflow:
+
+1. Create tasks.
+2. Set task priorities.
+3. Assign tasks to time slots.
+4. Review schedule conflicts.
+5. Start the day.
+6. Track task execution.
+7. Mark tasks completed or skipped.
+8. Record reasons for unfinished work when desired.
+9. Review daily performance.
+
+Make the workflow quick and intuitive.
+
+Do not force the user to fill in every optional field.
+
+## E. Recurring schedules
+
+Support recurring activities such as:
+
+* Daily exercise
+* Daily study
+* Weekly review
+* Monthly planning
+
+Support appropriate recurrence rules, including selected weekdays.
+
+When generating future scheduled occurrences, prevent accidental duplication.
+
+Editing one occurrence should not unexpectedly modify the entire recurring series.
+
+Provide options to edit:
+
+* This occurrence
+* This and future occurrences
+* The entire series
+
+Implement these controls only when the underlying recurrence model can support them safely.
+
+---
+
+# PART 6: TASK MANAGEMENT AND TO-DO LIST
+
+Build a complete task manager.
+
+## A. Task properties
+
+Each task must support:
+
+* Unique ID
+* Title
+* Description
+* Due date
+* Start date, if relevant
+* Priority
+* Status
+* Category
+* Estimated duration
+* Actual duration
+* Scheduled time block
+* Linked habit
+* Linked goal
+* Tags
+* Notes
+* Creation timestamp
+* Last updated timestamp
+* Completion timestamp
+* Optional reason for delay or cancellation
+
+Use these priority levels:
+
+* Urgent
+* High
+* Medium
+* Low
+
+Provide an urgency indicator and a separate importance indicator where practical.
+
+Do not treat urgency and importance as identical.
+
+Support task statuses such as:
+
+* Not Started
+* In Progress
+* Completed
+* Skipped
+* Cancelled
+
+Overdue tasks must be identified automatically based on their deadlines and completion status.
+
+## B. Task views
+
+Provide:
+
+1. All Tasks
+2. Today
+3. Upcoming
+4. Overdue
+5. Completed
+6. By Priority
+7. By Category
+8. By Goal
+
+Support:
+
+* Search
+* Filters
+* Sorting
+* Editing
+* Deletion with confirmation
+* Bulk completion where appropriate
+
+## C. Task completion
+
+When a task is marked completed:
+
+* Save the completion timestamp.
+* Update dashboard metrics.
+* Update relevant task reports.
+* Update linked goal progress when the task is an eligible measurable contribution.
+* Update schedule status if linked.
+* Update relevant analytics.
+
+Do not automatically mark a habit completed merely because a task with a similar name is completed.
+
+Habit completion must follow explicit linking and the habit's completion rules.
+
+Avoid double-counting task duration when a time log already represents the same work.
+
+---
+
+# PART 7: HABIT TRACKER
+
+Build a flexible habit tracking system.
+
+Habits must be independent recurring activities that can optionally connect to tasks and goals.
+
+## A. Create a habit
+
+Each habit should support:
+
+* Habit name
+* Description
+* Category
+* Icon
+* Color
+* Start date
+* Optional end date
+* Frequency
+* Selected weekdays
+* Daily or weekly target
+* Unit of measurement
+* Target quantity
+* Optional preferred time
+* Optional linked goal
+* Optional linked task template
+* Active or archived status
+
+Examples:
+
+* DSA Practice: 2 hours daily
+* Reading: 20 pages daily
+* Exercise: 1 session daily
+* Coding: 90 minutes daily
+* Sleep: 8 hours daily
+
+Support different tracking types:
+
+1. Binary: completed or not completed.
+2. Quantity-based: number of pages, repetitions, glasses, or similar units.
+3. Duration-based: minutes or hours.
+4. Count-based: number of sessions or occurrences.
+
+## B. Habit completion
+
+For each habit occurrence, support:
+
+* Mark complete
+* Mark partially complete when appropriate
+* Record quantity
+* Record duration
+* Add a note
+* Undo or correct an entry
+
+Save habit history by date.
+
+Do not overwrite previous dates when the user changes a habit's name, target, or frequency.
+
+Preserve historical records and apply habit edits to future behavior where appropriate.
+
+## C. Habit analytics
+
+Calculate:
+
+* Today's completion rate
+* Weekly completion rate
+* Monthly completion rate
+* Current streak
+* Best streak
+* Total completions
+* Completion history
+* Missed scheduled occurrences
+* Quantity or duration against target
+
+Use the habit's actual scheduled frequency as the denominator.
+
+For example, a habit scheduled only on weekdays must not count Saturday and Sunday as missed occurrences.
+
+Define streak rules clearly.
+
+An unscheduled day must not break a streak.
+
+Do not award a completion for a day without a valid completion record.
+
+## D. Habit calendar
+
+Create a calendar-style habit history using daily status indicators.
+
+Allow the user to select a date and inspect:
+
+* Habits scheduled
+* Habits completed
+* Partial progress
+* Missed habits
+* Recorded quantities
+* Notes
+
+## E. Habit consistency
+
+Provide weekly and monthly visualizations that make consistency easy to understand.
+
+Allow the user to compare habits over time.
+
+Avoid shaming language for missed habits.
+
+Use neutral, actionable language such as:
+"You completed 5 of 7 scheduled occurrences."
+
+---
+
+# PART 8: TIME TRACKER
+
+Build a functional time-tracking system.
+
+The user needs to know how many hours they intended to work versus how many hours they actually worked.
+
+## A. Timer controls
+
+Provide:
+
+* Start
+* Pause
+* Resume
+* Stop
+* Save session
+* Discard session
+* Manual time entry
+
+Allow a time session to be linked to:
+
+* A task
+* A habit
+* A goal
+* A category
+
+A single session may reference related entities, but its duration must not be counted multiple times in total working hours.
+
+## B. Timer reliability
+
+The timer must not depend solely on repeatedly incrementing a JavaScript counter.
+
+Persist the session's start timestamp and other necessary timing state.
+
+Calculate elapsed time using timestamps so that refreshing the page does not erase accumulated time.
+
+Handle browser restarts and interrupted sessions gracefully.
+
+If a timer was running when the application was closed, detect the unfinished session on the next launch and allow the user to resume, stop, or correct it.
+
+Prevent multiple simultaneous timers unless the application explicitly supports them.
+
+## C. Time categories
+
+Provide editable categories such as:
+
+* Study
+* Coding
+* Exercise
+* Reading
+* Work
+* Personal Development
+* Personal
+* Break
+* Other
+
+Let the user add and edit categories.
+
+## D. Time analytics
+
+Calculate:
+
+* Planned hours
+* Actual tracked hours
+* Difference between planned and actual time
+* Time spent by category
+* Time spent per task
+* Time spent per habit
+* Daily tracked hours
+* Weekly tracked hours
+* Monthly tracked hours
+* Yearly tracked hours
+
+Clearly distinguish between:
+
+1. Scheduled time
+2. Tracked actual time
+3. Manually recorded time
+4. Untracked time
+
+Do not label scheduled time as actual time.
+
+Do not assume that a task's estimated duration equals its actual duration.
+
+---
+
+# PART 9: GOAL MANAGEMENT
+
+Build a dedicated goal management system.
+
+The user must be able to create and monitor goals at different time horizons.
+
+Support:
+
+* Weekly goals
+* Monthly goals
+* Six-month goals
+* Yearly goals
+* Custom-duration goals
+* Long-term goals spanning multiple years
+
+## A. Goal properties
+
+Each goal must support:
+
+* Goal ID
+* Title
+* Description
+* Category
+* Start date
+* Target date
+* Goal horizon
+* Priority
+* Target value
+* Current value
+* Unit
+* Progress calculation method
+* Linked tasks
+* Linked habits
+* Linked time-tracking categories
+* Milestones
+* Status
+* Notes
+
+Examples:
+
+1. Study DSA for 60 hours this month.
+2. Solve 100 coding problems this month.
+3. Complete 25 workouts this month.
+4. Read 12 books this year.
+5. Finish a project by December.
+6. Maintain a habit completion rate above 85%.
+
+## B. Goal measurement
+
+Support these goal types:
+
+1. Numeric goals
+   Example: Complete 100 coding problems.
+
+2. Duration goals
+   Example: Study 60 hours.
+
+3. Completion goals
+   Example: Finish a project with five milestones.
+
+4. Consistency goals
+   Example: Complete a habit on 25 days this month.
+
+5. Percentage goals
+   Example: Reach 85% weekly habit consistency.
+
+6. Milestone-based goals
+   Example: Complete planning, development, testing, and deployment.
+
+The user must choose or configure the appropriate measurement method.
+
+## C. Automatic progress
+
+Whenever possible, derive goal progress from linked records.
+
+Examples:
+
+If a goal is to study 60 hours:
+
+* Sum eligible linked study time entries.
+* Calculate progress against 60 hours.
+* Calculate remaining hours.
+* Update the progress indicator.
+
+If a goal is to complete 100 coding problems:
+
+* Count explicitly linked completed coding tasks or manually recorded achievements.
+* Do not count unrelated tasks.
+
+If a goal is to exercise 25 times:
+
+* Count valid linked workout completions.
+* Prevent duplicate counting.
+
+If a goal is to complete a project:
+
+* Track its milestones and calculate progress using a clearly defined method.
+
+Provide manual progress updates when automatic measurement is unsuitable.
+
+Never mix manual and automatically derived progress in a way that double-counts the same achievement.
+
+## D. Goal hierarchy
+
+Support parent goals and subgoals.
+
+Example:
+
+YEARLY GOAL:
+Become proficient in DSA.
+
+```
+SIX-MONTH GOAL:
+Complete the core DSA syllabus.
+
+    MONTHLY GOAL:
+    Master linked lists and trees.
+
+        WEEKLY GOAL:
+        Solve 20 related problems.
+
+            DAILY TASK:
+            Solve 3 problems.
+```
+
+Allow users to connect related goals across different horizons.
+
+Do not assume that every goal belongs to exactly one parent.
+
+Prevent circular goal relationships.
+
+## E. Goal analysis
+
+Display:
+
+* Target value
+* Current progress
+* Percentage completed
+* Remaining amount
+* Days remaining
+* Required average daily progress
+* Required average weekly progress
+* Actual average progress
+* Milestone completion
+* Deadline status
+
+When enough data is available, compare actual progress with the expected pace.
+
+Clearly distinguish:
+
+* Ahead of schedule
+* On track
+* Behind schedule
+* Completed
+* Overdue
+
+Do not classify a goal as behind schedule when the target, deadline, or progress data is insufficient.
+
+For percentage-based goals, define the calculation carefully and avoid dividing by zero.
+
+---
+
+# PART 10: CALENDAR AND HISTORICAL RECORDS
+
+Build a calendar that connects tasks, habits, scheduled activities, and time logs.
+
+Provide:
+
+* Day view
+* Week view
+* Month view
+* Year overview
+* Date navigation
+* Today shortcut
+* Historical date selection
+
+Selecting a date should display its recorded information.
+
+Allow the user to inspect previous days and correct historical entries when necessary.
+
+## Historical integrity
+
+Historical records are essential because the user intends to use the application for years.
+
+The application must preserve:
+
+* Completed tasks
+* Missed tasks
+* Habit occurrences
+* Habit completion history
+* Scheduled activities
+* Time sessions
+* Daily reviews
+* Goal progress history
+* Notes and reflections
+
+Changing a task, habit, or goal today must not silently rewrite the historical truth of previous dates.
+
+Store timestamps in a consistent format and use the user's local timezone for daily boundaries.
+
+Use an appropriate date library or carefully tested date utilities.
+
+Avoid date bugs caused by UTC conversion, daylight-saving transitions, or midnight boundaries.
+
+Allow navigation to previous years and future planning dates.
+
+Do not impose a 30-day or 12-month data retention limit.
+
+---
+
+# PART 11: AUTOMATED ANALYTICS ENGINE
+
+This is one of the most important parts of the application.
+
+Build a centralized analytics engine using real saved data.
+
+Do not hardcode chart values, sample performance percentages, or fake productivity scores.
+
+Use reusable, testable calculation functions.
+
+All reports must be calculated from the same underlying records so that the dashboard and analytics screens agree.
+
+## A. Daily analytics
+
+For each day, calculate:
+
+* Total scheduled tasks
+* Completed tasks
+* Incomplete tasks
+* Overdue tasks
+* Task completion rate
+* Scheduled minutes
+* Actual tracked minutes
+* Time variance
+* Schedule adherence
+* Habit completion rate
+* Goal progress
+* Productivity score
+* Comparison with the previous day
+
+Define every metric precisely.
+
+For example:
+
+Task completion rate =
+Completed eligible tasks / Total eligible planned tasks × 100
+
+Do not include cancelled tasks in the denominator.
+
+Define how skipped tasks and overdue tasks affect the metric, and use the same rules throughout the application.
+
+Schedule adherence should be based on actual execution relative to planned activities, not simply on the percentage of tasks completed.
+
+Do not assume a scheduled task was performed merely because its time slot has passed.
+
+## B. Weekly analytics
+
+Calculate:
+
+* Tasks completed during the week
+* Weekly task completion rate
+* Planned versus actual hours
+* Habit consistency
+* Goal progress
+* Daily performance trend
+* Best-performing day
+* Lowest-performing day
+* Comparison with the previous week
+* Unfinished task carryover
+
+Use the user's configured week-start preference.
+
+Default to Monday as the first day of the week.
+
+## C. Monthly analytics
+
+Calculate:
+
+* Total tasks created
+* Total tasks completed
+* Monthly task completion rate
+* Planned versus actual time
+* Time distribution by category
+* Habit consistency
+* Monthly goal progress
+* Daily performance trend
+* Weekly performance comparison
+* Comparison with the previous month
+* Overdue task trends
+
+Distinguish between tasks created during the month and tasks completed during the month.
+
+Do not confuse those two metrics.
+
+## D. Yearly analytics
+
+Calculate:
+
+* Total completed tasks
+* Total recorded productive hours
+* Total scheduled hours
+* Annual habit completion rate
+* Monthly performance trends
+* Annual goal progress
+* Most consistent habits
+* Most productive categories by tracked time
+* Best-performing months
+* Comparison with the previous year
+* Long-term progress toward selected goals
+
+Use actual historical data.
+
+If previous-year data is unavailable, display an appropriate message rather than inventing a comparison.
+
+## E. Six-month analytics
+
+Provide a six-month overview for users who set half-year goals.
+
+Display monthly progress, goal milestones, habit consistency, tracked hours, and trends across the selected period.
+
+Allow the user to choose the six-month period.
+
+## F. Analytics visualization
+
+Use suitable charts, such as:
+
+* Line charts for trends
+* Bar charts for comparisons
+* Stacked bars for planned versus actual time
+* Donut charts for completion breakdowns
+* Heatmaps for habit consistency
+* Progress bars for goals
+* Calendar views for daily performance
+
+Charts must:
+
+* Use actual data
+* Have meaningful labels
+* Support empty states
+* Display useful tooltips
+* Adapt to different screen sizes
+* Avoid misleading scales
+* Clearly indicate the selected date range
+
+Provide filters for date range, task category, habit, goal, and time category when relevant.
+
+## G. Productivity score
+
+Implement an optional transparent productivity score.
+
+Start with a configurable default formula:
+
+* 40% task completion rate
+* 30% habit completion rate
+* 30% schedule adherence
+
+The score is:
+
+Productivity Score =
+0.40 × Task Completion Rate
+
+* 0.30 × Habit Completion Rate
+* 0.30 × Schedule Adherence
+
+Each component is expressed as a value from 0 to 100.
+
+Important rules:
+
+1. Allow the user to configure the weights.
+2. Validate that weights are nonnegative and total 100%.
+3. Normalize the components to the same 0–100 scale.
+4. Define how missing components are handled.
+5. Do not treat missing data as successful performance.
+6. Clearly label the score as an internal productivity indicator, not an objective measure of personal worth.
+7. Display the component breakdown.
+8. Allow the user to disable the score and view raw metrics instead.
+
+If there is insufficient data to calculate a meaningful score, display "Insufficient data" rather than a misleading number.
+
+## H. Automated insights
+
+Build a deterministic insight engine using rules and actual metrics.
+
+Examples:
+
+* "Your tracked study time increased by 15% compared with last week."
+* "You completed 18 of your 24 planned tasks this week."
+* "You are 4 hours behind your monthly study target."
+* "Exercise was completed on 6 of its 7 scheduled days."
+* "Your task completion rate declined compared with the previous week."
+
+Insights must include their comparison period and use correct arithmetic.
+
+Do not invent reasons for performance changes.
+
+Do not make psychological, medical, or personality diagnoses.
+
+Do not require an external AI service to generate these insights.
+
+---
+
+# PART 12: DAILY, WEEKLY, MONTHLY, AND YEARLY REVIEWS
+
+Create structured review interfaces.
+
+## Daily review
+
+Allow the user to record:
+
+* What went well?
+* What did not go as planned?
+* What caused delays?
+* What did I learn?
+* What should I improve tomorrow?
+* Most important task for tomorrow
+
+Automatically attach the date and show the day's performance summary.
+
+## Weekly review
+
+Include:
+
+* Weekly targets
+* Achievements
+* Incomplete goals
+* Habit consistency
+* Planned versus actual hours
+* Best-performing day
+* Main obstacles
+* Lessons learned
+* Next week's priorities
+
+## Monthly review
+
+Include:
+
+* Monthly goals
+* Achievement percentages
+* Habit trends
+* Time allocation
+* Completed milestones
+* Missed targets
+* Previous-month comparison
+* Next month's priorities
+
+## Yearly review
+
+Include:
+
+* Annual goals
+* Completed and incomplete goals
+* Monthly performance
+* Total tracked time
+* Long-term habit consistency
+* Major milestones
+* Lessons learned
+* Next year's priorities
+
+Reviews must be editable and saved permanently.
+
+Prepopulate review screens with calculated statistics, but let the user write their own reflections.
+
+Never generate personal reflections on the user's behalf without clearly identifying them as suggestions.
+
+---
+
+# PART 13: DATA MANAGEMENT AND BACKUPS
+
+Local data safety is a mandatory feature.
+
+Implement a Data & Settings screen.
+
+## A. Export
+
+Allow the user to export all essential application data into a portable JSON backup.
+
+The export must include:
+
+* Tasks
+* Habits
+* Habit history
+* Scheduled activities
+* Time logs
+* Goals
+* Goal relationships
+* Milestones
+* Reviews
+* Categories
+* User preferences
+* Schema version and export timestamp
+
+Use a consistent, documented export format.
+
+If records have relationships, preserve their IDs and references.
+
+The user must be able to save the exported file to their computer.
+
+## B. Import and restore
+
+Allow the user to restore data from a valid backup.
+
+Before importing:
+
+* Validate the file format.
+* Validate the schema version.
+* Check required fields.
+* Detect duplicate IDs.
+* Validate entity relationships.
+* Warn the user about potential conflicts.
+
+Provide clear import options where feasible:
+
+* Restore by replacing existing application data
+* Merge with existing data
+
+A replacement restore must require explicit confirmation.
+
+Never silently erase existing records.
+
+If an import fails, avoid leaving the database partially overwritten.
+
+## C. Additional controls
+
+Provide:
+
+* Manual backup
+* Export selected reports to CSV where appropriate
+* Storage usage estimate where feasible
+* Clear all data option with strong confirmation
+* Database version information
+
+Do not promise that browser storage can never be deleted.
+
+Clearly explain that clearing browser data, uninstalling certain browsers, or storage eviction may remove local records.
+
+Encourage regular exports.
+
+---
+
+# PART 14: SETTINGS AND PERSONALIZATION
+
+Provide settings for:
+
+* Application theme
+* Light mode
+* Dark mode
+* System theme
+* 12-hour or 24-hour clock
+* Week start day
+* Default day start and end
+* Default task durations
+* Habit categories
+* Task categories
+* Time categories
+* Productivity score weights
+* Date and number formatting
+* Default dashboard view
+
+Persist user preferences.
+
+Use a consistent design system across the application.
+
+Avoid adding unnecessary account creation, cloud synchronization, social features, or public leaderboards.
+
+The primary user is one individual using a personal local productivity tool.
+
+---
+
+# PART 15: UI/UX DESIGN SYSTEM
+
+The application should look like a polished premium productivity product.
+
+Use the following design direction:
+
+* Modern
+* Minimal
+* Calm
+* Professional
+* Data-rich without feeling cluttered
+* Consistent
+* Responsive
+* Keyboard-friendly
+* Accessible
+
+Visual inspiration may include the usability and information hierarchy of modern productivity dashboards, calendar applications, and personal analytics tools.
+
+Do not directly copy another product's branding or interface.
+
+## Layout
+
+Desktop:
+
+* Sidebar navigation
+* Main content area
+* Clear page titles
+* Consistent card grid
+* Well-spaced charts and tables
+
+Mobile:
+
+* Responsive navigation
+* Stacked cards
+* Touch-friendly controls
+* Readable charts
+* Accessible forms
+
+## Components
+
+Create reusable components for:
+
+* Buttons
+* Input fields
+* Select menus
+* Dialogs
+* Dropdowns
+* Cards
+* Progress indicators
+* Data tables
+* Date pickers
+* Charts
+* Calendar cells
+* Status badges
+* Empty states
+* Toast notifications
+* Confirmation dialogs
+
+## Color system
+
+Use a restrained neutral foundation with one primary accent color.
+
+Suggested semantic colors:
+
+* Green for completed
+* Amber for attention
+* Red for overdue or critical
+* Blue for informational
+* Gray for inactive
+
+Ensure sufficient contrast in both light and dark modes.
+
+Do not rely on color alone to communicate status.
+
+## Interaction design
+
+Every mutation should provide appropriate feedback.
+
+Examples:
+
+* Task saved
+* Habit marked complete
+* Goal updated
+* Timer started
+* Backup exported
+* Data restored successfully
+
+Prevent accidental deletion and destructive actions.
+
+Use optimistic updates only when failures can be handled safely.
+
+Provide loading, empty, error, and success states.
+
+Do not use excessive animation or decorative effects that slow down routine use.
+
+Prioritize fast daily interaction over visual complexity.
+
+---
+
+# PART 16: DATA MODEL AND BUSINESS LOGIC
+
+Create strongly typed models for all major entities.
+
+At minimum, implement entities equivalent to:
+
+1. Task
+2. Habit
+3. HabitOccurrence
+4. ScheduleBlock
+5. TimeSession
+6. Goal
+7. GoalMilestone
+8. DailyReview
+9. WeeklyReview
+10. MonthlyReview
+11. YearlyReview
+12. Category
+13. UserSettings
+
+Use unique, stable identifiers.
+
+Represent dates and timestamps consistently.
+
+Maintain explicit relationships between entities.
+
+Use separate historical occurrence records for recurring habits and tasks.
+
+Do not rely on a task's current status to reconstruct every past state.
+
+Do not overwrite previous habit completions when editing a habit definition.
+
+## Data integrity
+
+Implement:
+
+* Input validation
+* Required-field validation
+* Referential integrity checks
+* Duplicate prevention where appropriate
+* Safe deletion behavior
+* Consistent timestamp handling
+* Schema migration support
+* Centralized calculations
+* Error handling
+
+If deleting a goal with linked tasks or habits, explain what will happen to the linked records.
+
+Do not cascade-delete valuable historical records without explicit user consent.
+
+## Derived versus stored values
+
+Store authoritative user actions and historical records.
+
+Derive metrics such as:
+
+* Completion rates
+* Remaining goal progress
+* Time variance
+* Streaks
+* Period comparisons
+
+Do not independently store multiple conflicting versions of the same derived metric.
+
+If performance optimization requires caching, make sure caches can be safely rebuilt from authoritative records.
+
+---
+
+# PART 17: IMPLEMENTATION PHASES
+
+Build the application in this order.
+
+Do not stop after describing these phases. Execute the implementation.
+
+## Phase 1: Foundation
+
+* Set up the project.
+* Create the application shell.
+* Build the navigation.
+* Define the design system.
+* Create typed data models.
+* Implement IndexedDB persistence.
+* Implement application initialization.
+* Add error and empty states.
+
+## Phase 2: Core daily workflow
+
+* Dashboard
+* Task manager
+* Daily planner
+* Habit tracker
+* Time tracker
+
+The user must be able to plan a day, execute activities, record completion, and preserve the data.
+
+## Phase 3: Goals and history
+
+* Goal management
+* Goal hierarchy
+* Milestones
+* Calendar
+* Historical records
+* Daily reviews
+
+## Phase 4: Analytics
+
+* Daily analytics
+* Weekly analytics
+* Monthly analytics
+* Six-month analytics
+* Yearly analytics
+* Charts
+* Productivity score
+* Automated rule-based insights
+
+## Phase 5: Data safety
+
+* JSON export
+* JSON import
+* Backup validation
+* Restore workflow
+* CSV report exports
+* Settings persistence
+
+## Phase 6: Quality assurance
+
+* Run the production build.
+* Resolve TypeScript errors.
+* Resolve dependency errors.
+* Fix runtime exceptions.
+* Test database persistence.
+* Test task completion.
+* Test habit streaks.
+* Test timer behavior.
+* Test date boundaries.
+* Test goal calculations.
+* Test analytics calculations.
+* Test import and export.
+* Test responsive layouts.
+
+Prioritize completing a coherent working application over producing many incomplete screens.
+
+---
+
+# PART 18: ACCEPTANCE TESTS
+
+The application is not considered complete unless the following scenarios work.
+
+## Test 1: Data persistence
+
+1. Create a task.
+2. Refresh the page.
+3. Verify that the task remains.
+4. Close and reopen the application.
+5. Verify that the task remains.
+
+## Test 2: Daily planning
+
+1. Create a task.
+2. Schedule it from 09:00 to 11:00.
+3. Verify that the planned duration is two hours.
+4. Attempt to schedule an overlapping activity.
+5. Verify that the application warns about the conflict.
+
+## Test 3: Habit tracking
+
+1. Create a daily habit.
+2. Mark it complete.
+3. Verify the completion date.
+4. Refresh the application.
+5. Verify that completion remains saved.
+6. Check the habit's weekly and monthly analytics.
+
+## Test 4: Time tracking
+
+1. Start a timer.
+2. Let time accumulate.
+3. Pause and resume it.
+4. Stop and save the session.
+5. Verify the recorded duration.
+6. Verify that total tracked time is updated.
+7. Refresh during an active session and verify recovery behavior.
+
+## Test 5: Goal progress
+
+1. Create a goal to study 60 hours in one month.
+2. Record a linked study session of two hours.
+3. Verify that goal progress increases by two hours.
+4. Verify that 58 hours remain.
+5. Ensure that the same session is not counted twice.
+
+## Test 6: Daily analytics
+
+1. Plan five eligible tasks.
+2. Complete four.
+3. Verify a task completion rate of 80%.
+4. Verify that the dashboard and analytics page show the same result.
+
+## Test 7: Historical analytics
+
+1. Create records in two different weeks.
+2. Verify that each record appears in the correct period.
+3. Verify weekly comparisons.
+4. Ensure that missing historical data is not fabricated.
+
+## Test 8: Backup and restoration
+
+1. Create tasks, habits, time logs, and goals.
+2. Export a backup.
+3. Import it into an empty database.
+4. Verify that records and relationships are preserved.
+5. Test invalid-file handling.
+6. Ensure that an unsuccessful restore does not silently destroy existing data.
+
+## Test 9: Long-term history
+
+1. Create a record for a previous date.
+2. Navigate to that date.
+3. Verify that the record appears.
+4. Navigate to a different year.
+5. Confirm that historical records remain accessible.
+
+## Test 10: Usability
+
+1. Verify that all sidebar navigation items work.
+2. Verify that buttons perform their intended actions.
+3. Verify that forms validate their inputs.
+4. Verify that the interface works at desktop and mobile widths.
+5. Verify that empty states are useful and not misleading.
+
+---
+
+# PART 19: NON-NEGOTIABLE RULES
+
+Follow these rules throughout implementation.
+
+1. Build a real application, not a static mockup.
+2. Do not use fake analytics data in the production interface.
+3. Do not create buttons that do nothing.
+4. Do not leave major screens as placeholders.
+5. Do not use temporary in-memory state as the only storage.
+6. Do not require a cloud account for core functionality.
+7. Do not require a paid API for core functionality.
+8. Do not discard existing user data when the application reloads.
+9. Do not impose an arbitrary historical data limit.
+10. Do not count the same time session twice.
+11. Do not double-count goal achievements.
+12. Do not change historical records silently.
+13. Do not treat unrecorded activity as completed work.
+14. Do not invent analytics or performance explanations.
+15. Do not silently overwrite overlapping scheduled activities.
+16. Do not introduce unnecessary features that distract from personal productivity.
+17. Do not stop at the first working screen.
+18. Do not claim tests passed unless they were actually run.
+19. Keep business logic modular and maintainable.
+20. Preserve the user's ability to export and recover their data.
+
+If a trade-off becomes necessary, prioritize data safety, correctness, persistence, and the core daily workflow.
+
+---
+
+# PART 20: FINAL DELIVERABLES
+
+Deliver the following:
+
+1. A complete local-first React and TypeScript web application.
+2. A polished, responsive user interface.
+3. Functional dashboard and navigation.
+4. Working task management.
+5. Working daily scheduling.
+6. Working habit tracking.
+7. Working time tracking.
+8. Working goal management.
+9. Daily, weekly, monthly, six-month, and yearly analytics.
+10. Calendar and historical records.
+11. Daily, weekly, monthly, and yearly reviews.
+12. JSON data export and restoration.
+13. CSV exports where appropriate.
+14. Persistent application settings.
+15. IndexedDB database initialization and migrations.
+16. package.json and all required project configuration.
+17. A README with installation, startup, build, storage, backup, and restore instructions.
+18. Meaningful automated tests for important calculations and data operations.
+
+At the end of implementation, provide a concise report stating:
+
+* What was implemented
+* Which major features are functional
+* The technology stack
+* How data is stored locally
+* How to run the application
+* How to build the application
+* How to export and restore data
+* Which tests were actually executed
+* Any known limitations
+
+Do not state that a feature is complete if it is only a visual placeholder.
+
+## FINAL INSTRUCTION
+
+Begin implementing LIFE OS now.
+
+First establish the application architecture and local persistence. Then implement the complete core workflow, followed by goals, historical data, analytics, and backup functionality.
+
+Maintain a consistent design system throughout.
+
+Make sensible implementation decisions without asking unnecessary questions.
+
+Build the most reliable, complete, maintainable version possible within the available environment.
+
+The final result must be an application the user can genuinely use every day, save personal data in for years, and run locally on their own computer.
