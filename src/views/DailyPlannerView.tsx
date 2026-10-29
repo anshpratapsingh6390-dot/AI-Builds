@@ -11,6 +11,7 @@ import {
   Layers,
   Edit2,
   Trash2,
+  RotateCcw,
   AlertCircle,
   HelpCircle,
   ArrowRight,
@@ -37,6 +38,9 @@ export const DailyPlannerView: React.FC = () => {
     addScheduleBlock,
     updateScheduleBlock,
     deleteScheduleBlock,
+    resetScheduleBlock,
+    clearScheduleBlocksForDate,
+    resetScheduleBlocksForDate,
     startTimer,
     settings,
   } = useLifeOS();
@@ -45,6 +49,8 @@ export const DailyPlannerView: React.FC = () => {
   const [isAddingBlock, setIsAddingBlock] = useState(false);
   const [editingBlock, setEditingBlock] = useState<ScheduleBlock | null>(null);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const [isClearDayModalOpen, setIsClearDayModalOpen] = useState(false);
+  const [isResetDayModalOpen, setIsResetDayModalOpen] = useState(false);
 
   // Form states
   const [title, setTitle] = useState('');
@@ -187,7 +193,30 @@ export const DailyPlannerView: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Day action buttons when blocks exist */}
+          {dayBlocks.length > 0 && (
+            <>
+              <button
+                onClick={() => setIsResetDayModalOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-neutral-900 border border-neutral-800 hover:bg-neutral-850 text-neutral-300 text-xs font-medium transition-colors"
+                title="Reset all planned activities for this date back to scheduled"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-indigo-400" />
+                <span className="hidden sm:inline">Reset Day Progress</span>
+              </button>
+
+              <button
+                onClick={() => setIsClearDayModalOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/20 text-rose-400 text-xs font-semibold transition-colors"
+                title="Delete all planned activities for this date"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Clear Day</span>
+              </button>
+            </>
+          )}
+
           {/* View toggle */}
           <div className="flex items-center bg-neutral-900 border border-neutral-800 rounded-xl p-1 text-xs">
             <button
@@ -386,6 +415,13 @@ export const DailyPlannerView: React.FC = () => {
                           </button>
                         )}
                         <button
+                          onClick={() => resetScheduleBlock(block.id)}
+                          className="p-2 rounded-xl bg-neutral-800 hover:bg-neutral-750 text-neutral-400 hover:text-indigo-400 border border-neutral-700 transition-colors"
+                          title="Reset progress to scheduled"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                        </button>
+                        <button
                           onClick={() => handleOpenEdit(block)}
                           className="p-2 rounded-xl bg-neutral-800 hover:bg-neutral-750 text-neutral-300 border border-neutral-700"
                           title="Edit activity"
@@ -443,33 +479,89 @@ export const DailyPlannerView: React.FC = () => {
                                 <div
                                   key={block.id}
                                   onClick={() => handleOpenEdit(block)}
-                                  className={`p-3 rounded-xl border cursor-pointer transition-all flex items-center justify-between gap-3 ${
+                                  className={`p-3 rounded-xl border cursor-pointer transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 group/item ${
                                     isDone
                                       ? 'bg-neutral-950/60 border-neutral-850 opacity-70'
                                       : 'bg-neutral-850/80 border-neutral-750 hover:border-indigo-500/50 hover:bg-neutral-800 shadow-xs'
                                   }`}
                                 >
                                   <div className="flex items-center gap-2.5">
-                                    <span
-                                      className={`text-xs font-bold ${
-                                        isDone ? 'line-through text-neutral-500' : 'text-neutral-100'
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        updateScheduleBlock(block.id, {
+                                          status: isDone ? 'scheduled' : 'completed',
+                                          actualDuration: isDone ? 0 : block.plannedDuration,
+                                        });
+                                      }}
+                                      className={`w-5 h-5 rounded-md flex items-center justify-center border transition-all shrink-0 ${
+                                        isDone
+                                          ? 'bg-emerald-500 border-emerald-500 text-white'
+                                          : 'border-neutral-700 hover:border-neutral-500 text-transparent'
                                       }`}
+                                      title={isDone ? 'Mark as scheduled' : 'Mark as completed'}
                                     >
-                                      {block.title}
-                                    </span>
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-neutral-900 text-neutral-400">
-                                      {block.category}
-                                    </span>
+                                      <Check className="w-3.5 h-3.5" />
+                                    </button>
+
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span
+                                        className={`text-xs font-bold ${
+                                          isDone ? 'line-through text-neutral-500' : 'text-neutral-100'
+                                        }`}
+                                      >
+                                        {block.title}
+                                      </span>
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-neutral-900 text-neutral-400">
+                                        {block.category}
+                                      </span>
+                                    </div>
                                   </div>
 
-                                  <div className="flex items-center gap-3 text-xs font-mono text-neutral-400">
-                                    <span>
-                                      {formatTimeDisplay(block.startTime, is12h)} -{' '}
-                                      {formatTimeDisplay(block.endTime, is12h)}
-                                    </span>
-                                    <span className="text-neutral-200 font-sans font-medium">
-                                      {formatDuration(block.plannedDuration)}
-                                    </span>
+                                  <div className="flex items-center gap-3">
+                                    <div className="flex items-center gap-3 text-xs font-mono text-neutral-400">
+                                      <span>
+                                        {formatTimeDisplay(block.startTime, is12h)} -{' '}
+                                        {formatTimeDisplay(block.endTime, is12h)}
+                                      </span>
+                                      <span className="text-neutral-200 font-sans font-medium">
+                                        {formatDuration(block.plannedDuration)}
+                                      </span>
+                                    </div>
+
+                                    {/* Action buttons on timeline block */}
+                                    <div className="flex items-center gap-1.5 opacity-90 sm:opacity-0 group-hover/item:opacity-100 transition-opacity">
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          resetScheduleBlock(block.id);
+                                        }}
+                                        className="p-1.5 rounded-lg bg-neutral-900/80 hover:bg-neutral-700 text-neutral-400 hover:text-indigo-400 transition-colors"
+                                        title="Reset block progress to scheduled"
+                                      >
+                                        <RotateCcw className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleOpenEdit(block);
+                                        }}
+                                        className="p-1.5 rounded-lg bg-neutral-900/80 hover:bg-neutral-700 text-neutral-400 hover:text-neutral-200 transition-colors"
+                                        title="Edit activity"
+                                      >
+                                        <Edit2 className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setDeleteTargetId(block.id);
+                                        }}
+                                        className="p-1.5 rounded-lg bg-neutral-900/80 hover:bg-rose-500/20 text-neutral-400 hover:text-rose-400 transition-colors"
+                                        title="Delete scheduled activity"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
                                   </div>
                                 </div>
                               );
@@ -671,20 +763,70 @@ export const DailyPlannerView: React.FC = () => {
                 </div>
               )}
 
-              <div className="flex items-center justify-end gap-3 pt-3">
-                <button
-                  type="button"
-                  onClick={() => setIsAddingBlock(false)}
-                  className="px-4 py-2 text-xs font-medium rounded-xl border border-neutral-700 bg-neutral-800 text-neutral-300 hover:bg-neutral-750"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 text-xs font-semibold rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white"
-                >
-                  {editingBlock ? 'Save Changes' : 'Schedule Activity'}
-                </button>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-neutral-800">
+                {editingBlock ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const targetId = editingBlock.id;
+                        setIsAddingBlock(false);
+                        setDeleteTargetId(targetId);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 transition-colors"
+                      title="Delete this scheduled block"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await resetScheduleBlock(editingBlock.id);
+                        setIsAddingBlock(false);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-xl bg-neutral-800 hover:bg-neutral-750 text-neutral-300 border border-neutral-700 transition-colors"
+                      title="Reset progress to scheduled (0m tracked)"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Reset</span>
+                    </button>
+
+                    {editingBlock.linkedTaskId && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await deleteScheduleBlock(editingBlock.id);
+                          setIsAddingBlock(false);
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-xl bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/20 transition-colors"
+                        title="Remove from today's schedule and return task to unscheduled backlog"
+                      >
+                        <Layers className="w-3.5 h-3.5" />
+                        <span>Unschedule</span>
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div />
+                )}
+
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingBlock(false)}
+                    className="px-4 py-2 text-xs font-medium rounded-xl border border-neutral-700 bg-neutral-800 text-neutral-300 hover:bg-neutral-750"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 text-xs font-semibold rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white shadow-xs"
+                  >
+                    {editingBlock ? 'Save Changes' : 'Schedule Activity'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -695,11 +837,38 @@ export const DailyPlannerView: React.FC = () => {
       <ConfirmModal
         isOpen={!!deleteTargetId}
         title="Delete Schedule Activity"
-        message="Are you sure you want to remove this scheduled activity? Historical records already completed will remain in time logs."
+        message="Are you sure you want to remove this scheduled activity? If it is linked to a task, the task will return to your unscheduled list."
         confirmLabel="Delete"
         isDestructive
         onConfirm={handleDeleteBlock}
         onCancel={() => setDeleteTargetId(null)}
+      />
+
+      {/* Clear Day Confirmation */}
+      <ConfirmModal
+        isOpen={isClearDayModalOpen}
+        title="Clear All Scheduled Activities"
+        message={`Are you sure you want to remove all ${dayBlocks.length} scheduled activities for ${selectedDate}? Any linked tasks will be safely preserved in your task list.`}
+        confirmLabel="Clear All"
+        isDestructive
+        onConfirm={async () => {
+          await clearScheduleBlocksForDate(selectedDate);
+          setIsClearDayModalOpen(false);
+        }}
+        onCancel={() => setIsClearDayModalOpen(false)}
+      />
+
+      {/* Reset Day Confirmation */}
+      <ConfirmModal
+        isOpen={isResetDayModalOpen}
+        title="Reset Today's Schedule Progress"
+        message="This will reset all scheduled activities on this date back to 'scheduled' status, with 0 actual minutes tracked. Continue?"
+        confirmLabel="Reset Progress"
+        onConfirm={async () => {
+          await resetScheduleBlocksForDate(selectedDate);
+          setIsResetDayModalOpen(false);
+        }}
+        onCancel={() => setIsResetDayModalOpen(false)}
       />
     </div>
   );

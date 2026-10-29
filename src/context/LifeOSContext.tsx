@@ -53,6 +53,7 @@ interface LifeOSContextType {
   updateTask: (id: string, updates: Partial<Task>) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
   toggleTaskStatus: (id: string) => Promise<void>;
+  resetTask: (id: string) => Promise<void>;
 
   // Habit Mutations
   addHabit: (habit: Omit<Habit, 'id' | 'createdAt' | 'updatedAt'>) => Promise<string>;
@@ -64,6 +65,9 @@ interface LifeOSContextType {
   addScheduleBlock: (block: Omit<ScheduleBlock, 'id' | 'createdAt' | 'updatedAt'>) => Promise<string>;
   updateScheduleBlock: (id: string, updates: Partial<ScheduleBlock>) => Promise<void>;
   deleteScheduleBlock: (id: string) => Promise<void>;
+  resetScheduleBlock: (id: string) => Promise<void>;
+  clearScheduleBlocksForDate: (date: string) => Promise<void>;
+  resetScheduleBlocksForDate: (date: string) => Promise<void>;
 
   // Goal Mutations
   addGoal: (goal: Omit<Goal, 'id' | 'createdAt' | 'updatedAt'>) => Promise<string>;
@@ -406,6 +410,13 @@ export const LifeOSProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [refreshAll]);
 
   const deleteTask = useCallback(async (id: string) => {
+    const linkedBlock = await db.scheduleBlocks.where('linkedTaskId').equals(id).first();
+    if (linkedBlock) {
+      await db.scheduleBlocks.update(linkedBlock.id, {
+        linkedTaskId: undefined,
+        updatedAt: new Date().toISOString(),
+      });
+    }
     await db.tasks.delete(id);
     await refreshAll();
   }, [refreshAll]);
@@ -416,6 +427,26 @@ export const LifeOSProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const nextStatus = task.status === 'completed' ? 'not_started' : 'completed';
     await updateTask(id, { status: nextStatus });
   }, [updateTask]);
+
+  const resetTask = useCallback(async (id: string) => {
+    const now = new Date().toISOString();
+    await db.tasks.update(id, {
+      status: 'not_started',
+      actualDuration: 0,
+      completedAt: undefined,
+      updatedAt: now,
+    });
+    const linkedBlock = await db.scheduleBlocks.where('linkedTaskId').equals(id).first();
+    if (linkedBlock) {
+      await db.scheduleBlocks.update(linkedBlock.id, {
+        status: 'scheduled',
+        actualDuration: 0,
+        notes: '',
+        updatedAt: now,
+      });
+    }
+    await refreshAll();
+  }, [refreshAll]);
 
   // Habit Mutations
   const addHabit = useCallback(async (habitData: Omit<Habit, 'id' | 'createdAt' | 'updatedAt'>) => {
@@ -517,7 +548,91 @@ export const LifeOSProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [refreshAll]);
 
   const deleteScheduleBlock = useCallback(async (id: string) => {
+    const block = await db.scheduleBlocks.get(id);
+    const now = new Date().toISOString();
+    if (block?.linkedTaskId) {
+      await db.tasks.update(block.linkedTaskId, {
+        scheduleBlockId: undefined,
+        updatedAt: now,
+      });
+    }
+    const allTasks = await db.tasks.toArray();
+    for (const t of allTasks) {
+      if (t.scheduleBlockId === id) {
+        await db.tasks.update(t.id, {
+          scheduleBlockId: undefined,
+          updatedAt: now,
+        });
+      }
+    }
     await db.scheduleBlocks.delete(id);
+    await refreshAll();
+  }, [refreshAll]);
+
+  const resetScheduleBlock = useCallback(async (id: string) => {
+    const block = await db.scheduleBlocks.get(id);
+    if (!block) return;
+    const now = new Date().toISOString();
+    await db.scheduleBlocks.update(id, {
+      status: 'scheduled',
+      actualDuration: 0,
+      notes: '',
+      updatedAt: now,
+    });
+    if (block.linkedTaskId) {
+      await db.tasks.update(block.linkedTaskId, {
+        status: 'not_started',
+        completedAt: undefined,
+        actualDuration: 0,
+        updatedAt: now,
+      });
+    }
+    await refreshAll();
+  }, [refreshAll]);
+
+  const clearScheduleBlocksForDate = useCallback(async (date: string) => {
+    const blocks = await db.scheduleBlocks.where('date').equals(date).toArray();
+    const now = new Date().toISOString();
+    for (const b of blocks) {
+      if (b.linkedTaskId) {
+        await db.tasks.update(b.linkedTaskId, {
+          scheduleBlockId: undefined,
+          updatedAt: now,
+        });
+      }
+      await db.scheduleBlocks.delete(b.id);
+    }
+    const allTasks = await db.tasks.toArray();
+    for (const t of allTasks) {
+      if (blocks.some((b) => b.id === t.scheduleBlockId)) {
+        await db.tasks.update(t.id, {
+          scheduleBlockId: undefined,
+          updatedAt: now,
+        });
+      }
+    }
+    await refreshAll();
+  }, [refreshAll]);
+
+  const resetScheduleBlocksForDate = useCallback(async (date: string) => {
+    const blocks = await db.scheduleBlocks.where('date').equals(date).toArray();
+    const now = new Date().toISOString();
+    for (const b of blocks) {
+      await db.scheduleBlocks.update(b.id, {
+        status: 'scheduled',
+        actualDuration: 0,
+        notes: '',
+        updatedAt: now,
+      });
+      if (b.linkedTaskId) {
+        await db.tasks.update(b.linkedTaskId, {
+          status: 'not_started',
+          completedAt: undefined,
+          actualDuration: 0,
+          updatedAt: now,
+        });
+      }
+    }
     await refreshAll();
   }, [refreshAll]);
 
@@ -743,6 +858,7 @@ export const LifeOSProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       updateTask,
       deleteTask,
       toggleTaskStatus,
+      resetTask,
       addHabit,
       updateHabit,
       deleteHabit,
@@ -750,6 +866,9 @@ export const LifeOSProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       addScheduleBlock,
       updateScheduleBlock,
       deleteScheduleBlock,
+      resetScheduleBlock,
+      clearScheduleBlocksForDate,
+      resetScheduleBlocksForDate,
       addGoal,
       updateGoal,
       deleteGoal,
@@ -800,6 +919,7 @@ export const LifeOSProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       updateTask,
       deleteTask,
       toggleTaskStatus,
+      resetTask,
       addHabit,
       updateHabit,
       deleteHabit,
@@ -807,6 +927,9 @@ export const LifeOSProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       addScheduleBlock,
       updateScheduleBlock,
       deleteScheduleBlock,
+      resetScheduleBlock,
+      clearScheduleBlocksForDate,
+      resetScheduleBlocksForDate,
       addGoal,
       updateGoal,
       deleteGoal,

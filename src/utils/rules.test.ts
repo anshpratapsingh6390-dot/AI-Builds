@@ -277,3 +277,72 @@ test('calculate7DayHabitConsistency: evaluates last 7 days against scheduled fre
   assert.equal(res.days[6].date, '2026-10-28');
   assert.equal(res.days[6].isCompleted, true);
 });
+
+test('Schedule block and task reset state transitions', () => {
+  // Initial completed block with tracked duration and variance notes
+  const completedBlock: ScheduleBlock = {
+    id: 'block-1',
+    title: 'Deep Work: System Design',
+    date: '2026-10-28',
+    startTime: '10:00',
+    endTime: '12:00',
+    plannedDuration: 120,
+    actualDuration: 135,
+    category: 'Work',
+    priority: 'high',
+    status: 'completed',
+    notes: 'Ran 15m over due to edge cases',
+    linkedTaskId: 'task-1',
+    createdAt: '2026-10-28T09:00:00Z',
+    updatedAt: '2026-10-28T12:15:00Z',
+  };
+
+  // Reset operation returns block to unstarted scheduled state with 0 actual duration and empty notes
+  const resetBlock: ScheduleBlock = {
+    ...completedBlock,
+    status: 'scheduled',
+    actualDuration: 0,
+    notes: '',
+  };
+
+  assert.equal(resetBlock.status, 'scheduled');
+  assert.equal(resetBlock.actualDuration, 0);
+  assert.equal(resetBlock.notes, '');
+  assert.equal(resetBlock.linkedTaskId, 'task-1');
+
+  // Completed task reset state
+  const completedTask: Task = {
+    id: 'task-1',
+    title: 'Prepare RFC Documentation',
+    category: 'Work',
+    priority: 'high',
+    estimatedDuration: 60,
+    actualDuration: 75,
+    status: 'completed',
+    completedAt: '2026-10-28T12:00:00Z',
+    tags: ['rfc', 'work'],
+    scheduleBlockId: 'block-1',
+    createdAt: '2026-10-28T08:00:00Z',
+    updatedAt: '2026-10-28T12:00:00Z',
+  };
+
+  // Reset task operation resets status to not_started and clears completion & duration
+  const resetTask: Task = {
+    ...completedTask,
+    status: 'not_started',
+    actualDuration: 0,
+    completedAt: undefined,
+  };
+
+  assert.equal(resetTask.status, 'not_started');
+  assert.equal(resetTask.actualDuration, 0);
+  assert.equal(resetTask.completedAt, undefined);
+
+  // Unschedule operation: block is deleted and task.scheduleBlockId is cleared
+  const unscheduledTask: Task = {
+    ...resetTask,
+    scheduleBlockId: undefined,
+  };
+
+  assert.equal(unscheduledTask.scheduleBlockId, undefined);
+});

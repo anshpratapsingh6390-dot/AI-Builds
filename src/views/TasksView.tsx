@@ -11,6 +11,7 @@ import {
   AlertCircle,
   Trash2,
   Edit2,
+  RotateCcw,
   ChevronDown,
   Layers,
   Sparkles,
@@ -30,6 +31,7 @@ export const TasksView: React.FC = () => {
     addTask,
     updateTask,
     deleteTask,
+    resetTask,
     toggleTaskStatus,
     setQuickAddOpen,
     setQuickAddType,
@@ -356,6 +358,13 @@ export const TasksView: React.FC = () => {
                 {/* Right Actions */}
                 <div className="flex items-center gap-2 self-end sm:self-center">
                   <button
+                    onClick={() => resetTask(task.id)}
+                    className="p-2 rounded-xl bg-neutral-800 hover:bg-neutral-750 text-neutral-400 hover:text-indigo-400 border border-neutral-700 transition-colors"
+                    title="Reset task status & progress"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                  </button>
+                  <button
                     onClick={() => setEditingTask(task)}
                     className="p-2 rounded-xl bg-neutral-800 hover:bg-neutral-750 text-neutral-300 border border-neutral-700"
                     title="Edit task"
@@ -495,26 +504,55 @@ export const TasksView: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-3 pt-3">
-              <button
-                type="button"
-                onClick={() => setEditingTask(null)}
-                className="px-4 py-2 text-xs font-medium rounded-xl border border-neutral-700 bg-neutral-800 text-neutral-300 hover:bg-neutral-750"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  if (editingTask) {
-                    await updateTask(editingTask.id, editingTask);
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-neutral-800">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const id = editingTask.id;
                     setEditingTask(null);
-                  }
-                }}
-                className="px-5 py-2 text-xs font-semibold rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white"
-              >
-                Save Changes
-              </button>
+                    setDeleteTaskId(id);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await resetTask(editingTask.id);
+                    setEditingTask(null);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-xl bg-neutral-800 hover:bg-neutral-750 text-neutral-300 border border-neutral-700 transition-colors"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Reset Status</span>
+                </button>
+              </div>
+
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingTask(null)}
+                  className="px-4 py-2 text-xs font-medium rounded-xl border border-neutral-700 bg-neutral-800 text-neutral-300 hover:bg-neutral-750"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (editingTask) {
+                      await updateTask(editingTask.id, editingTask);
+                      setEditingTask(null);
+                    }
+                  }}
+                  className="px-5 py-2 text-xs font-semibold rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white shadow-xs"
+                >
+                  Save Changes
+                </button>
+              </div>
             </div>
           </div>
         </div>

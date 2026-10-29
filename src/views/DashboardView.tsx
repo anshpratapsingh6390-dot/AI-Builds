@@ -13,10 +13,13 @@ import {
   Plus,
   Flame,
   Zap,
+  RotateCcw,
+  Trash2,
 } from 'lucide-react';
 import { useLifeOS } from '../context/LifeOSContext';
 import { StatCard } from '../components/StatCard';
 import { ScoreModal } from '../components/ScoreModal';
+import { ConfirmModal } from '../components/ConfirmModal';
 import {
   calculateHabitCompletionRate,
   calculateHabitStreak,
@@ -44,8 +47,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
     milestones,
     selectedDate,
     toggleTaskStatus,
+    deleteTask,
+    resetTask,
     recordHabitOccurrence,
     updateScheduleBlock,
+    deleteScheduleBlock,
+    resetScheduleBlock,
     startTimer,
     setQuickAddOpen,
     setQuickAddType,
@@ -53,6 +60,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
   } = useLifeOS();
 
   const [scoreModalOpen, setScoreModalOpen] = useState(false);
+  const [deleteBlockId, setDeleteBlockId] = useState<string | null>(null);
+  const [deleteTaskId, setDeleteTaskId] = useState<string | null>(null);
 
   // Filter entities for selectedDate
   const todayTasks = tasks.filter((t) => t.dueDate === selectedDate || t.startDate === selectedDate);
@@ -365,7 +374,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
                     </div>
 
                     {/* Quick controls */}
-                    <div className="flex items-center gap-2 self-end sm:self-center">
+                    <div className="flex items-center gap-1.5 self-end sm:self-center">
                       {!isCompleted && (
                         <button
                           onClick={() =>
@@ -377,12 +386,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
                               linkedGoalId: block.linkedGoalId,
                             })
                           }
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-750 text-neutral-200 text-xs font-medium border border-neutral-700 transition-colors"
+                          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-750 text-neutral-200 text-xs font-medium border border-neutral-700 transition-colors"
+                          title="Start timer for this block"
                         >
                           <Play className="w-3 h-3 text-indigo-400" />
-                          <span>Track Time</span>
+                          <span className="hidden sm:inline">Track Time</span>
                         </button>
                       )}
+
+                      <button
+                        onClick={() => resetScheduleBlock(block.id)}
+                        className="p-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-750 text-neutral-400 hover:text-indigo-400 border border-neutral-700 transition-colors"
+                        title="Reset scheduled activity progress"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        onClick={() => setDeleteBlockId(block.id)}
+                        className="p-1.5 rounded-lg bg-neutral-800 hover:bg-rose-500/20 text-neutral-400 hover:text-rose-400 border border-neutral-700 transition-colors"
+                        title="Delete scheduled activity"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
                 );
@@ -422,7 +448,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
                   return (
                     <div
                       key={t.id}
-                      className="p-3 rounded-xl bg-neutral-900/70 border border-neutral-800 flex items-center justify-between gap-3 text-xs"
+                      className="p-3 rounded-xl bg-neutral-900/70 border border-neutral-800 flex items-center justify-between gap-3 text-xs group"
                     >
                       <div className="flex items-center gap-3">
                         <button
@@ -451,6 +477,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
                         >
                           {t.priority}
                         </span>
+
+                        <button
+                          onClick={() => resetTask(t.id)}
+                          className="p-1 rounded-md bg-neutral-800 hover:bg-neutral-750 text-neutral-400 hover:text-indigo-400 transition-colors"
+                          title="Reset task status"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                        </button>
+
+                        <button
+                          onClick={() => setDeleteTaskId(t.id)}
+                          className="p-1 rounded-md bg-neutral-800 hover:bg-rose-500/20 text-neutral-400 hover:text-rose-400 transition-colors"
+                          title="Delete task"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
                       </div>
                     </div>
                   );
@@ -635,6 +677,38 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
         score={scoreResult.score}
         breakdown={scoreResult.breakdown}
         isInsufficientData={scoreResult.isInsufficientData}
+      />
+
+      {/* Delete Schedule Block Confirmation */}
+      <ConfirmModal
+        isOpen={!!deleteBlockId}
+        title="Delete Schedule Activity"
+        message="Are you sure you want to remove this scheduled activity from today's plan? If linked to a task, the task will be returned to your backlog."
+        confirmLabel="Delete"
+        isDestructive
+        onConfirm={async () => {
+          if (deleteBlockId) {
+            await deleteScheduleBlock(deleteBlockId);
+            setDeleteBlockId(null);
+          }
+        }}
+        onCancel={() => setDeleteBlockId(null)}
+      />
+
+      {/* Delete Task Confirmation */}
+      <ConfirmModal
+        isOpen={!!deleteTaskId}
+        title="Delete Task"
+        message="Are you sure you want to delete this task? This action is permanent."
+        confirmLabel="Delete"
+        isDestructive
+        onConfirm={async () => {
+          if (deleteTaskId) {
+            await deleteTask(deleteTaskId);
+            setDeleteTaskId(null);
+          }
+        }}
+        onCancel={() => setDeleteTaskId(null)}
       />
     </div>
   );
