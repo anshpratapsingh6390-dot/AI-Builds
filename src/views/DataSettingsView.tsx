@@ -24,9 +24,12 @@ import {
   exportFullBackup,
   exportToCsv,
   restoreFromBackup,
+  validateBackupData,
 } from '../db';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { RestorePreviewModal } from '../components/RestorePreviewModal';
 import { PWAInstallButton } from '../components/PWAInstallButton';
+import { ExportData, RestoreEntityCounts } from '../types';
 
 export const DataSettingsView: React.FC = () => {
   const {
@@ -75,6 +78,18 @@ export const DataSettingsView: React.FC = () => {
   const [restoreMode, setRestoreMode] = useState<'replace' | 'merge'>('replace');
   const [isWipeModalOpen, setIsWipeModalOpen] = useState(false);
   const [storageInfo, setStorageInfo] = useState<{ usedMb: string; quotaMb: string } | null>(null);
+
+  // Restore preview modal state
+  const [pendingRestore, setPendingRestore] = useState<{
+    data: ExportData;
+    mode: 'replace' | 'merge';
+    filename: string;
+    exportedAt?: string;
+    version: number;
+    counts: RestoreEntityCounts;
+  } | null>(null);
+  const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
 
   useEffect(() => {
     if (typeof navigator !== 'undefined' && navigator.storage && navigator.storage.estimate) {
@@ -136,19 +151,55 @@ export const DataSettingsView: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setImportStatus('Reading backup file...');
+    setImportStatus('Validating backup file...');
     setImportError(null);
 
     try {
       const text = await file.text();
-      const json = JSON.parse(text);
+      let json: unknown;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        throw new Error('Invalid JSON format: file could not be parsed.');
+      }
 
-      const res = await restoreFromBackup(json, restoreMode);
-      setImportStatus(res.message);
-      await refreshAll();
+      const validation = validateBackupData(json);
+      if (!validation.valid || !validation.data || !validation.counts) {
+        throw new Error(validation.error || 'Invalid backup structure.');
+      }
+
+      setPendingRestore({
+        data: validation.data,
+        mode: restoreMode,
+        filename: file.name,
+        exportedAt: validation.data.exportedAt,
+        version: validation.data.version,
+        counts: validation.counts,
+      });
+      setIsRestoreModalOpen(true);
+      setImportStatus(null);
     } catch (err: any) {
       setImportError(err.message || 'Failed to parse backup JSON.');
       setImportStatus(null);
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  const handleExecuteRestore = async () => {
+    if (!pendingRestore) return;
+    setIsRestoring(true);
+    setImportError(null);
+    try {
+      const res = await restoreFromBackup(pendingRestore.data, pendingRestore.mode);
+      setImportStatus(res.message);
+      setIsRestoreModalOpen(false);
+      setPendingRestore(null);
+      await refreshAll();
+    } catch (err: any) {
+      setImportError(err.message || 'Failed to restore backup.');
+    } finally {
+      setIsRestoring(false);
     }
   };
 
@@ -166,6 +217,10 @@ export const DataSettingsView: React.FC = () => {
       db.monthlyReviews.clear(),
       db.yearlyReviews.clear(),
     ]);
+    // Persist isInitialSeedCompleted: true so wiping keeps database empty after reload/refresh
+    const currentSettings = (await db.settings.get('current_user_settings')) || DEFAULT_SETTINGS;
+    await db.settings.put({ ...currentSettings, isInitialSeedCompleted: true });
+
     setIsWipeModalOpen(false);
     await refreshAll();
   };
@@ -678,6 +733,24 @@ export const DataSettingsView: React.FC = () => {
         onConfirm={handleWipeDatabase}
         onCancel={() => setIsWipeModalOpen(false)}
       />
+
+      {/* Restore Preview and Confirmation Modal */}
+      {pendingRestore && (
+        <RestorePreviewModal
+          isOpen={isRestoreModalOpen}
+          filename={pendingRestore.filename}
+          exportedAt={pendingRestore.exportedAt}
+          version={pendingRestore.version}
+          mode={pendingRestore.mode}
+          counts={pendingRestore.counts}
+          isRestoring={isRestoring}
+          onConfirm={handleExecuteRestore}
+          onCancel={() => {
+            setIsRestoreModalOpen(false);
+            setPendingRestore(null);
+          }}
+        />
+      )}
     </div>
   );
 };

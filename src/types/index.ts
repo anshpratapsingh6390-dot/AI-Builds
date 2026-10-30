@@ -231,6 +231,19 @@ export interface UserSettings {
   };
   showProductivityScore: boolean;
   activeTimerState?: ActiveTimerState;
+  isInitialSeedCompleted?: boolean;
+}
+
+export interface RestoreEntityCounts {
+  tasks: number;
+  habits: number;
+  habitOccurrences: number;
+  scheduleBlocks: number;
+  timeSessions: number;
+  goals: number;
+  goalMilestones: number;
+  categories: number;
+  reviews: number;
 }
 
 export interface ExportData {
@@ -250,3 +263,4 @@ export interface ExportData {
   categories: Category[];
   settings: UserSettings;
 }
+
