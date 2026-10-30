@@ -399,6 +399,31 @@ export const LifeOSProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     await db.tasks.update(id, finalUpdates);
 
+    // Bidirectional sync with Goal.linkedTaskIds if linkedGoalId changed
+    if (updates.linkedGoalId !== undefined && updates.linkedGoalId !== current.linkedGoalId) {
+      if (current.linkedGoalId) {
+        const oldGoal = await db.goals.get(current.linkedGoalId);
+        if (oldGoal && Array.isArray(oldGoal.linkedTaskIds)) {
+          await db.goals.update(oldGoal.id, {
+            linkedTaskIds: oldGoal.linkedTaskIds.filter((tid) => tid !== id),
+            updatedAt: now,
+          });
+        }
+      }
+      if (updates.linkedGoalId) {
+        const newGoal = await db.goals.get(updates.linkedGoalId);
+        if (newGoal) {
+          const currentTaskIds = Array.isArray(newGoal.linkedTaskIds) ? newGoal.linkedTaskIds : [];
+          if (!currentTaskIds.includes(id)) {
+            await db.goals.update(newGoal.id, {
+              linkedTaskIds: [...currentTaskIds, id],
+              updatedAt: now,
+            });
+          }
+        }
+      }
+    }
+
     // If linked to a schedule block, update schedule block status
     const linkedBlock = await db.scheduleBlocks.where('linkedTaskId').equals(id).first();
     if (linkedBlock && updates.status) {
@@ -542,8 +567,35 @@ export const LifeOSProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [refreshAll]);
 
   const updateScheduleBlock = useCallback(async (id: string, updates: Partial<ScheduleBlock>) => {
+    const block = await db.scheduleBlocks.get(id);
     const now = new Date().toISOString();
     await db.scheduleBlocks.update(id, { ...updates, updatedAt: now });
+
+    const linkedTaskId = updates.linkedTaskId !== undefined ? updates.linkedTaskId : block?.linkedTaskId;
+    if (linkedTaskId) {
+      const task = await db.tasks.get(linkedTaskId);
+      if (task) {
+        const taskUpdates: Partial<Task> = { updatedAt: now };
+        if (updates.status === 'completed') {
+          taskUpdates.status = 'completed';
+          taskUpdates.completedAt = now;
+          const actualMins = updates.actualDuration !== undefined && updates.actualDuration > 0
+            ? updates.actualDuration
+            : (block?.plannedDuration || 0);
+          if (actualMins > 0) {
+            taskUpdates.actualDuration = Math.max(task.actualDuration || 0, actualMins);
+          }
+        } else if (updates.status === 'scheduled') {
+          if (updates.actualDuration === 0) {
+            taskUpdates.status = 'not_started';
+            taskUpdates.completedAt = undefined;
+            taskUpdates.actualDuration = 0;
+          }
+        }
+        await db.tasks.update(linkedTaskId, taskUpdates);
+      }
+    }
+
     await refreshAll();
   }, [refreshAll]);
 
@@ -647,17 +699,54 @@ export const LifeOSProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       updatedAt: now,
     };
     await db.goals.put(newGoal);
+
+    // Bidirectional sync: set linkedGoalId on all linked tasks
+    if (Array.isArray(newGoal.linkedTaskIds) && newGoal.linkedTaskIds.length > 0) {
+      for (const taskId of newGoal.linkedTaskIds) {
+        await db.tasks.update(taskId, { linkedGoalId: id, updatedAt: now });
+      }
+    }
+
     await refreshAll();
     return id;
   }, [refreshAll]);
 
   const updateGoal = useCallback(async (id: string, updates: Partial<Goal>) => {
+    const prevGoal = await db.goals.get(id);
     const now = new Date().toISOString();
     await db.goals.update(id, { ...updates, updatedAt: now });
+
+    // Bidirectional sync for task links if linkedTaskIds changed
+    if (updates.linkedTaskIds !== undefined) {
+      const prevTaskIds = new Set(prevGoal?.linkedTaskIds || []);
+      const nextTaskIds = new Set(updates.linkedTaskIds);
+
+      // Tasks removed from this goal
+      for (const prevId of prevTaskIds) {
+        if (!nextTaskIds.has(prevId)) {
+          const t = await db.tasks.get(prevId);
+          if (t && t.linkedGoalId === id) {
+            await db.tasks.update(prevId, { linkedGoalId: undefined, updatedAt: now });
+          }
+        }
+      }
+
+      // Tasks newly added to this goal
+      for (const nextId of nextTaskIds) {
+        await db.tasks.update(nextId, { linkedGoalId: id, updatedAt: now });
+      }
+    }
+
     await refreshAll();
   }, [refreshAll]);
 
   const deleteGoal = useCallback(async (id: string) => {
+    const now = new Date().toISOString();
+    // Unlink tasks that pointed to this goal
+    const linkedTasks = await db.tasks.where('linkedGoalId').equals(id).toArray();
+    for (const t of linkedTasks) {
+      await db.tasks.update(t.id, { linkedGoalId: undefined, updatedAt: now });
+    }
     await db.goals.delete(id);
     // Delete attached milestones
     await db.goalMilestones.where('goalId').equals(id).delete();

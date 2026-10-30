@@ -20,12 +20,14 @@ import { Goal, GoalHorizon, GoalMilestone, GoalProgressMethod, GoalType, Priorit
 import { calculateGoalProgress } from '../utils/rules';
 import { getTodayDateString, parseDate } from '../utils/dateUtils';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { GoalModal } from '../components/GoalModal';
 
 export const GoalsView: React.FC = () => {
   const {
     goals,
     tasks,
     habits,
+    scheduleBlocks,
     timeSessions,
     occurrences,
     milestones,
@@ -36,13 +38,13 @@ export const GoalsView: React.FC = () => {
     addMilestone,
     toggleMilestone,
     deleteMilestone,
-    setQuickAddOpen,
-    setQuickAddType,
   } = useLifeOS();
 
   const [activeHorizon, setActiveHorizon] = useState<GoalHorizon | 'all'>('all');
   const [selectedGoal, setSelectedGoal] = useState<Goal | null>(null);
   const [deleteGoalId, setDeleteGoalId] = useState<string | null>(null);
+  const [goalToEdit, setGoalToEdit] = useState<Goal | null>(null);
+  const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
 
   // New milestone form
   const [newMilestoneTitle, setNewMilestoneTitle] = useState('');
@@ -54,7 +56,7 @@ export const GoalsView: React.FC = () => {
   >();
 
   goals.forEach((g) => {
-    const prog = calculateGoalProgress(g, timeSessions, tasks, occurrences, milestones);
+    const prog = calculateGoalProgress(g, timeSessions, tasks, occurrences, milestones, scheduleBlocks);
     goalProgressMap.set(g.id, prog);
   });
 
@@ -104,8 +106,8 @@ export const GoalsView: React.FC = () => {
 
         <button
           onClick={() => {
-            setQuickAddType('goal');
-            setQuickAddOpen(true);
+            setGoalToEdit(null);
+            setIsGoalModalOpen(true);
           }}
           className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-sm shadow-indigo-950 transition-colors self-start sm:self-auto"
         >
@@ -244,9 +246,20 @@ export const GoalsView: React.FC = () => {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
+                          setGoalToEdit(goal);
+                          setIsGoalModalOpen(true);
+                        }}
+                        className="p-1 rounded text-neutral-500 hover:text-indigo-400 hover:bg-neutral-800 transition-colors"
+                        title="Edit goal configuration"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setDeleteGoalId(goal.id);
                         }}
-                        className="p-1 rounded text-neutral-500 hover:text-rose-400 hover:bg-neutral-800"
+                        className="p-1 rounded text-neutral-500 hover:text-rose-400 hover:bg-neutral-800 transition-colors"
                         title="Delete goal"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -270,12 +283,25 @@ export const GoalsView: React.FC = () => {
                   </span>
                   <h3 className="text-base font-bold text-neutral-100 mt-0.5">{selectedGoal.title}</h3>
                 </div>
-                <button
-                  onClick={() => setSelectedGoal(null)}
-                  className="text-xs text-neutral-400 hover:text-neutral-200"
-                >
-                  Close
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setGoalToEdit(selectedGoal);
+                      setIsGoalModalOpen(true);
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-750 text-indigo-400 text-xs font-semibold border border-neutral-700 transition-colors"
+                    title="Edit goal configuration"
+                  >
+                    <Edit2 className="w-3 h-3" />
+                    <span>Edit</span>
+                  </button>
+                  <button
+                    onClick={() => setSelectedGoal(null)}
+                    className="text-xs text-neutral-400 hover:text-neutral-200"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
 
               {/* Progress Detail */}
@@ -397,6 +423,16 @@ export const GoalsView: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Goal Creation & Edit Modal */}
+      <GoalModal
+        isOpen={isGoalModalOpen}
+        goalToEdit={goalToEdit}
+        onClose={() => {
+          setIsGoalModalOpen(false);
+          setGoalToEdit(null);
+        }}
+      />
 
       {/* Delete Goal Modal */}
       <ConfirmModal

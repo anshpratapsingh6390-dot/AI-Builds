@@ -422,7 +422,8 @@ export function calculateGoalProgress(
   timeSessions: TimeSession[],
   tasks: Task[],
   occurrences: HabitOccurrence[],
-  milestones: GoalMilestone[]
+  milestones: GoalMilestone[],
+  scheduleBlocks: ScheduleBlock[] = []
 ): {
   currentValue: number;
   percentage: number;
@@ -434,12 +435,30 @@ export function calculateGoalProgress(
 
   switch (goal.progressMethod) {
     case 'automatic_time': {
-      // Sum durations from time sessions in the date window linked directly to this goal,
-      // or to linked tasks/habits, or matching categories.
-      // Filter strictly to avoid double-counting.
+      // 1. Build set of explicitly linked task IDs and habit IDs
+      const explicitlyLinkedTaskIds = new Set<string>();
+      if (Array.isArray(goal.linkedTaskIds)) {
+        goal.linkedTaskIds.forEach((id) => explicitlyLinkedTaskIds.add(id));
+      }
+      tasks.forEach((t) => {
+        if (t.linkedGoalId === goal.id) {
+          explicitlyLinkedTaskIds.add(t.id);
+        }
+      });
+
+      const explicitlyLinkedHabitIds = new Set<string>();
+      if (Array.isArray(goal.linkedHabitIds)) {
+        goal.linkedHabitIds.forEach((id) => explicitlyLinkedHabitIds.add(id));
+      }
+
       const seenSessions = new Set<string>();
+      const sessionMinutesByTask = new Map<string, number>();
       let totalMinutes = 0;
 
+      // Only fall back to category if no explicit tasks or habits are linked
+      const hasExplicitLinks = explicitlyLinkedTaskIds.size > 0 || explicitlyLinkedHabitIds.size > 0;
+
+      // 2. Sum durations from Time Sessions
       for (const s of timeSessions) {
         if (seenSessions.has(s.id)) continue;
 
@@ -448,19 +467,71 @@ export function calculateGoalProgress(
         if (goal.startDate && sessionDate < goal.startDate) continue;
         if (goal.targetDate && sessionDate > goal.targetDate) continue;
 
-        const isLinkedGoal = s.linkedGoalId === goal.id;
-        const isLinkedTask = s.linkedTaskId && goal.linkedTaskIds?.includes(s.linkedTaskId);
-        const isLinkedHabit = s.linkedHabitId && goal.linkedHabitIds?.includes(s.linkedHabitId);
-        const isLinkedCategory = goal.linkedCategories?.includes(s.category);
+        const isDirectGoal = s.linkedGoalId === goal.id;
+        const isLinkedTask = Boolean(s.linkedTaskId && explicitlyLinkedTaskIds.has(s.linkedTaskId));
+        const isLinkedHabit = Boolean(s.linkedHabitId && explicitlyLinkedHabitIds.has(s.linkedHabitId));
+        const isAssignedToOtherGoal = Boolean(s.linkedGoalId && s.linkedGoalId !== goal.id);
+        const isCategoryMatch = !isAssignedToOtherGoal && Boolean(
+          (goal.linkedCategories && goal.linkedCategories.length > 0 && goal.linkedCategories.includes(s.category)) ||
+          (!hasExplicitLinks && goal.category && s.category === goal.category)
+        );
 
-        if (isLinkedGoal || isLinkedTask || isLinkedHabit || isLinkedCategory) {
+        if (isDirectGoal || isLinkedTask || isLinkedHabit || isCategoryMatch) {
           seenSessions.add(s.id);
           totalMinutes += s.durationMinutes;
+
+          if (s.linkedTaskId) {
+            sessionMinutesByTask.set(
+              s.linkedTaskId,
+              (sessionMinutesByTask.get(s.linkedTaskId) || 0) + s.durationMinutes
+            );
+          }
+        }
+      }
+
+      // 3. Process explicit Tasks' recorded actual duration without double counting
+      for (const t of tasks) {
+        if (!explicitlyLinkedTaskIds.has(t.id)) continue;
+
+        if (goal.startDate && t.dueDate && t.dueDate < goal.startDate) continue;
+        if (goal.targetDate && t.dueDate && t.dueDate > goal.targetDate) continue;
+
+        const recordedMinutes = t.actualDuration || 0;
+        const alreadyCountedMinutes = sessionMinutesByTask.get(t.id) || 0;
+
+        if (recordedMinutes > alreadyCountedMinutes) {
+          totalMinutes += (recordedMinutes - alreadyCountedMinutes);
+        }
+      }
+
+      // 4. Process completed schedule blocks linked to goal or linked tasks
+      for (const b of scheduleBlocks) {
+        if (b.status !== 'completed' || !b.actualDuration || b.actualDuration <= 0) continue;
+
+        if (goal.startDate && b.date && b.date < goal.startDate) continue;
+        if (goal.targetDate && b.date && b.date > goal.targetDate) continue;
+
+        const isBlockDirectGoal = b.linkedGoalId === goal.id;
+        const isBlockLinkedTask = Boolean(b.linkedTaskId && explicitlyLinkedTaskIds.has(b.linkedTaskId));
+
+        if (isBlockDirectGoal || isBlockLinkedTask) {
+          const linkedTask = b.linkedTaskId ? tasks.find((t) => t.id === b.linkedTaskId) : null;
+          const taskAlreadyCounted = linkedTask && (linkedTask.actualDuration || 0) >= b.actualDuration;
+          if (!taskAlreadyCounted) {
+            const sessionForBlock = timeSessions.some((s) => s.linkedScheduleBlockId === b.id && seenSessions.has(s.id));
+            if (!sessionForBlock) {
+              totalMinutes += b.actualDuration;
+            }
+          }
         }
       }
 
       // Convert to hours if goal unit is hours
-      if (goal.unit.toLowerCase().includes('hour') || goal.unit.toLowerCase() === 'h' || goal.unit.toLowerCase() === 'hrs') {
+      const unitLower = (goal.unit || '').toLowerCase().trim();
+      const isHours = unitLower === 'hours' || unitLower === 'hour' || unitLower === 'h' || unitLower === 'hrs' || unitLower === 'hr';
+      const isMinutes = unitLower === 'minutes' || unitLower === 'minute' || unitLower === 'm' || unitLower === 'min' || unitLower === 'mins';
+
+      if (isHours || (!isMinutes && goal.goalType === 'duration')) {
         currentValue = Math.round((totalMinutes / 60) * 10) / 10;
       } else {
         currentValue = totalMinutes;
@@ -469,9 +540,18 @@ export function calculateGoalProgress(
     }
 
     case 'automatic_tasks': {
-      // Count completed tasks linked to this goal
+      const explicitlyLinkedTaskIds = new Set<string>();
+      if (Array.isArray(goal.linkedTaskIds)) {
+        goal.linkedTaskIds.forEach((id) => explicitlyLinkedTaskIds.add(id));
+      }
+      tasks.forEach((t) => {
+        if (t.linkedGoalId === goal.id) {
+          explicitlyLinkedTaskIds.add(t.id);
+        }
+      });
+
       const linked = tasks.filter((t) => {
-        if (t.linkedGoalId !== goal.id && !goal.linkedTaskIds?.includes(t.id)) return false;
+        if (!explicitlyLinkedTaskIds.has(t.id)) return false;
         if (goal.startDate && t.dueDate && t.dueDate < goal.startDate) return false;
         if (goal.targetDate && t.dueDate && t.dueDate > goal.targetDate) return false;
         return t.status === 'completed';
@@ -481,9 +561,13 @@ export function calculateGoalProgress(
     }
 
     case 'automatic_habits': {
-      // Count completed occurrences of linked habits
+      const explicitlyLinkedHabitIds = new Set<string>();
+      if (Array.isArray(goal.linkedHabitIds)) {
+        goal.linkedHabitIds.forEach((id) => explicitlyLinkedHabitIds.add(id));
+      }
+
       const linked = occurrences.filter((occ) => {
-        if (!goal.linkedHabitIds?.includes(occ.habitId)) return false;
+        if (!explicitlyLinkedHabitIds.has(occ.habitId)) return false;
         if (goal.startDate && occ.date < goal.startDate) return false;
         if (goal.targetDate && occ.date > goal.targetDate) return false;
         return occ.status === 'completed';
@@ -512,9 +596,9 @@ export function calculateGoalProgress(
       break;
   }
 
-  const target = goal.targetValue || 1;
+  const target = goal.targetValue > 0 ? goal.targetValue : 1;
   const percentage = Math.min(100, Math.max(0, Math.round((currentValue / target) * 100)));
-  const remaining = Math.max(0, target - currentValue);
+  const remaining = Math.max(0, Math.round((target - currentValue) * 10) / 10);
   const isCompleted = currentValue >= target;
 
   // Pace status calculation

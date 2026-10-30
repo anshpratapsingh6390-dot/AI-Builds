@@ -346,3 +346,543 @@ test('Schedule block and task reset state transitions', () => {
 
   assert.equal(unscheduledTask.scheduleBlockId, undefined);
 });
+
+/* ==========================================================================
+   TARGETED BUG FIX: TESTS 1 TO 9 (GOAL PROGRESS & TASK-GOAL LINKING)
+   ========================================================================== */
+
+test('TEST 1: 1.5h (90 min) completed task updates 15h goal to exactly 1.5h (10%), 13.5h remaining', () => {
+  const goal: Goal = {
+    id: 'goal-js-15h',
+    title: "COMPLETE JAVASCRIPT SERIES'S",
+    category: 'Coding',
+    horizon: 'weekly',
+    startDate: '2026-10-25',
+    targetDate: '2026-10-31',
+    priority: 'high',
+    goalType: 'duration',
+    targetValue: 15,
+    currentValue: 0,
+    unit: 'hours',
+    progressMethod: 'automatic_time',
+    linkedCategories: ['Coding'],
+    linkedHabitIds: [],
+    linkedTaskIds: ['task-js-1'],
+    status: 'in_progress',
+    createdAt: '2026-10-25T08:00:00Z',
+    updatedAt: '2026-10-25T08:00:00Z',
+  };
+
+  const task: Task = {
+    id: 'task-js-1',
+    title: "COMPLETE JAVASCRIPT SERIES'S",
+    category: 'Coding',
+    priority: 'high',
+    status: 'completed',
+    estimatedDuration: 90,
+    actualDuration: 90, // 1 hour 30 mins
+    dueDate: '2026-10-28',
+    linkedGoalId: 'goal-js-15h',
+    tags: ['javascript'],
+    createdAt: '2026-10-28T09:00:00Z',
+    updatedAt: '2026-10-28T10:30:00Z',
+    completedAt: '2026-10-28T10:30:00Z',
+  };
+
+  const progress = calculateGoalProgress(goal, [], [task], [], [], []);
+  // 90 minutes = 1.5 hours
+  // Target: 15 hours
+  // 1.5 / 15 = 10%
+  // Remaining: 13.5 hours
+  assert.equal(progress.currentValue, 1.5);
+  assert.equal(progress.percentage, 10);
+  assert.equal(progress.remaining, 13.5);
+  assert.equal(progress.isCompleted, false);
+});
+
+test('TEST 2: Changing task title does NOT break goal-task relationship or affect progress calculation', () => {
+  const goal: Goal = {
+    id: 'goal-react',
+    title: 'Master React & Vite',
+    category: 'Coding',
+    horizon: 'monthly',
+    startDate: '2026-10-01',
+    targetDate: '2026-10-31',
+    priority: 'high',
+    goalType: 'duration',
+    targetValue: 20,
+    currentValue: 0,
+    unit: 'hours',
+    progressMethod: 'automatic_time',
+    linkedCategories: ['Coding'],
+    linkedHabitIds: [],
+    linkedTaskIds: ['task-react-1'],
+    status: 'in_progress',
+    createdAt: '2026-10-01T00:00:00Z',
+    updatedAt: '2026-10-01T00:00:00Z',
+  };
+
+  const originalTask: Task = {
+    id: 'task-react-1',
+    title: 'Initial Title: Study Hooks',
+    category: 'Coding',
+    priority: 'high',
+    status: 'completed',
+    estimatedDuration: 120,
+    actualDuration: 120, // 2 hours
+    dueDate: '2026-10-15',
+    linkedGoalId: 'goal-react',
+    tags: [],
+    createdAt: '2026-10-15T00:00:00Z',
+    updatedAt: '2026-10-15T02:00:00Z',
+  };
+
+  const progBefore = calculateGoalProgress(goal, [], [originalTask], [], [], []);
+  assert.equal(progBefore.currentValue, 2);
+
+  // Rename task title completely
+  const renamedTask: Task = {
+    ...originalTask,
+    title: 'Completely Changed Title: Deep Dive into useEffect & useRef',
+  };
+
+  const progAfter = calculateGoalProgress(goal, [], [renamedTask], [], [], []);
+  // Progress MUST remain exactly the same because linking is ID-based, not name-based
+  assert.equal(progAfter.currentValue, 2);
+  assert.equal(progAfter.percentage, 10);
+  assert.equal(progAfter.remaining, 18);
+});
+
+test('TEST 3: Two tasks with identical names linked to different goals are strictly isolated', () => {
+  const goalA: Goal = {
+    id: 'goal-a',
+    title: 'Frontend Track',
+    category: 'Coding',
+    horizon: 'weekly',
+    startDate: '2026-10-25',
+    targetDate: '2026-10-31',
+    priority: 'high',
+    goalType: 'duration',
+    targetValue: 10,
+    currentValue: 0,
+    unit: 'hours',
+    progressMethod: 'automatic_time',
+    linkedCategories: [],
+    linkedHabitIds: [],
+    linkedTaskIds: ['task-1'],
+    status: 'in_progress',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const goalB: Goal = {
+    id: 'goal-b',
+    title: 'Backend Track',
+    category: 'Coding',
+    horizon: 'weekly',
+    startDate: '2026-10-25',
+    targetDate: '2026-10-31',
+    priority: 'high',
+    goalType: 'duration',
+    targetValue: 10,
+    currentValue: 0,
+    unit: 'hours',
+    progressMethod: 'automatic_time',
+    linkedCategories: [],
+    linkedHabitIds: [],
+    linkedTaskIds: ['task-2'],
+    status: 'in_progress',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  // Two tasks with IDENTICAL titles
+  const task1: Task = {
+    id: 'task-1',
+    title: 'Build API Integration',
+    category: 'Coding',
+    priority: 'medium',
+    status: 'completed',
+    estimatedDuration: 60,
+    actualDuration: 60, // 1 hour
+    dueDate: '2026-10-26',
+    linkedGoalId: 'goal-a',
+    tags: [],
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const task2: Task = {
+    id: 'task-2',
+    title: 'Build API Integration',
+    category: 'Coding',
+    priority: 'medium',
+    status: 'completed',
+    estimatedDuration: 180,
+    actualDuration: 180, // 3 hours
+    dueDate: '2026-10-27',
+    linkedGoalId: 'goal-b',
+    tags: [],
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const allTasks = [task1, task2];
+
+  const progA = calculateGoalProgress(goalA, [], allTasks, [], [], []);
+  const progB = calculateGoalProgress(goalB, [], allTasks, [], [], []);
+
+  assert.equal(progA.currentValue, 1.0); // Only task-1
+  assert.equal(progB.currentValue, 3.0); // Only task-2
+});
+
+test('TEST 4: Preventing double counting when time session is linked to both task and goal', () => {
+  const goal: Goal = {
+    id: 'goal-dsa',
+    title: 'DSA Practice',
+    category: 'Study',
+    horizon: 'weekly',
+    startDate: '2026-10-25',
+    targetDate: '2026-10-31',
+    priority: 'high',
+    goalType: 'duration',
+    targetValue: 10,
+    currentValue: 0,
+    unit: 'hours',
+    progressMethod: 'automatic_time',
+    linkedCategories: ['Study'],
+    linkedHabitIds: [],
+    linkedTaskIds: ['task-dsa-1'],
+    status: 'in_progress',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const task: Task = {
+    id: 'task-dsa-1',
+    title: 'Solve Leetcode DP',
+    category: 'Study',
+    priority: 'high',
+    status: 'completed',
+    estimatedDuration: 90,
+    actualDuration: 90, // 90 min recorded on task
+    dueDate: '2026-10-28',
+    linkedGoalId: 'goal-dsa',
+    tags: [],
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  // A time session also recorded for the same work (90 min)
+  const session: TimeSession = {
+    id: 'session-dsa-1',
+    title: 'DP Session',
+    startTime: '2026-10-28T14:00:00Z',
+    durationMinutes: 90,
+    category: 'Study',
+    linkedTaskId: 'task-dsa-1',
+    linkedGoalId: 'goal-dsa',
+    isManual: false,
+    createdAt: '',
+  };
+
+  const progress = calculateGoalProgress(goal, [session], [task], [], [], []);
+  // MUST NOT double-count to 180 min (3.0h). Must be exactly 90 min = 1.5 hours!
+  assert.equal(progress.currentValue, 1.5);
+  assert.equal(progress.percentage, 15);
+  assert.equal(progress.remaining, 8.5);
+});
+
+test('TEST 5: Schedule block actualDuration contributes to linked task and goal without double counting', () => {
+  const goal: Goal = {
+    id: 'goal-arch',
+    title: 'System Architecture',
+    category: 'Work',
+    horizon: 'weekly',
+    startDate: '2026-10-25',
+    targetDate: '2026-10-31',
+    priority: 'high',
+    goalType: 'duration',
+    targetValue: 5,
+    currentValue: 0,
+    unit: 'hours',
+    progressMethod: 'automatic_time',
+    linkedCategories: [],
+    linkedHabitIds: [],
+    linkedTaskIds: ['task-arch-1'],
+    status: 'in_progress',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const task: Task = {
+    id: 'task-arch-1',
+    title: 'Design Cache Strategy',
+    category: 'Work',
+    priority: 'high',
+    status: 'completed',
+    estimatedDuration: 60,
+    actualDuration: 60, // 1 hour synced
+    dueDate: '2026-10-27',
+    linkedGoalId: 'goal-arch',
+    tags: [],
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const block: ScheduleBlock = {
+    id: 'block-arch-1',
+    title: 'Design Cache Strategy Block',
+    date: '2026-10-27',
+    startTime: '10:00',
+    endTime: '11:00',
+    plannedDuration: 60,
+    actualDuration: 60,
+    category: 'Work',
+    priority: 'high',
+    status: 'completed',
+    linkedTaskId: 'task-arch-1',
+    linkedGoalId: 'goal-arch',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  // Both task and block exist with 60 min
+  const prog = calculateGoalProgress(goal, [], [task], [], [], [block]);
+  // Exactly 1.0 hour, no double counting!
+  assert.equal(prog.currentValue, 1.0);
+  assert.equal(prog.percentage, 20);
+  assert.equal(prog.remaining, 4.0);
+});
+
+test('TEST 6: Unit conversions and progress percentage capped at 100%', () => {
+  const hourGoal: Goal = {
+    id: 'goal-hr',
+    title: 'Hour Goal',
+    category: 'Study',
+    horizon: 'weekly',
+    startDate: '2026-10-25',
+    targetDate: '2026-10-31',
+    priority: 'medium',
+    goalType: 'duration',
+    targetValue: 2,
+    currentValue: 0,
+    unit: 'hours',
+    progressMethod: 'automatic_time',
+    linkedCategories: ['Study'],
+    linkedHabitIds: [],
+    linkedTaskIds: [],
+    status: 'in_progress',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  // 150 minutes logged = 2.5 hours (exceeds 2 hours target)
+  const session: TimeSession = {
+    id: 'sess-over',
+    title: 'Long Session',
+    startTime: '2026-10-26T10:00:00Z',
+    durationMinutes: 150,
+    category: 'Study',
+    linkedGoalId: 'goal-hr',
+    isManual: false,
+    createdAt: '',
+  };
+
+  const prog = calculateGoalProgress(hourGoal, [session], [], [], [], []);
+  assert.equal(prog.currentValue, 2.5);
+  // Capped at 100%
+  assert.equal(prog.percentage, 100);
+  assert.equal(prog.remaining, 0);
+  assert.equal(prog.isCompleted, true);
+});
+
+test('TEST 7: Date window filtering excludes work outside startDate and deadline', () => {
+  const goal: Goal = {
+    id: 'goal-window',
+    title: 'Sprint 42 Work',
+    category: 'Work',
+    horizon: 'custom',
+    startDate: '2026-10-10',
+    targetDate: '2026-10-20',
+    priority: 'high',
+    goalType: 'duration',
+    targetValue: 10,
+    currentValue: 0,
+    unit: 'hours',
+    progressMethod: 'automatic_time',
+    linkedCategories: ['Work'],
+    linkedHabitIds: [],
+    linkedTaskIds: [],
+    status: 'in_progress',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const sessions: TimeSession[] = [
+    {
+      id: 's-early',
+      title: 'Before sprint',
+      startTime: '2026-10-05T10:00:00Z',
+      durationMinutes: 120, // 2h -> outside
+      category: 'Work',
+      linkedGoalId: 'goal-window',
+      isManual: false,
+      createdAt: '',
+    },
+    {
+      id: 's-in',
+      title: 'During sprint',
+      startTime: '2026-10-15T10:00:00Z',
+      durationMinutes: 180, // 3h -> inside
+      category: 'Work',
+      linkedGoalId: 'goal-window',
+      isManual: false,
+      createdAt: '',
+    },
+    {
+      id: 's-late',
+      title: 'After deadline',
+      startTime: '2026-10-25T10:00:00Z',
+      durationMinutes: 240, // 4h -> outside
+      category: 'Work',
+      linkedGoalId: 'goal-window',
+      isManual: false,
+      createdAt: '',
+    },
+  ];
+
+  const prog = calculateGoalProgress(goal, sessions, [], [], [], []);
+  assert.equal(prog.currentValue, 3.0); // Only s-in counted
+  assert.equal(prog.percentage, 30);
+  assert.equal(prog.remaining, 7.0);
+});
+
+test('TEST 8: Non-time goal methods (automatic_tasks, automatic_habits, milestones)', () => {
+  // 1. Task count goal
+  const taskGoal: Goal = {
+    id: 'goal-tasks-count',
+    title: 'Complete 5 Core Bugs',
+    category: 'Work',
+    horizon: 'weekly',
+    startDate: '2026-10-25',
+    targetDate: '2026-10-31',
+    priority: 'high',
+    goalType: 'completion',
+    targetValue: 5,
+    currentValue: 0,
+    unit: 'tasks',
+    progressMethod: 'automatic_tasks',
+    linkedCategories: [],
+    linkedHabitIds: [],
+    linkedTaskIds: ['t1', 't2', 't3'],
+    status: 'in_progress',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const tasks: Task[] = [
+    { id: 't1', title: 'T1', category: 'Work', priority: 'medium', status: 'completed', estimatedDuration: 30, actualDuration: 30, tags: [], createdAt: '', updatedAt: '' },
+    { id: 't2', title: 'T2', category: 'Work', priority: 'medium', status: 'completed', estimatedDuration: 30, actualDuration: 30, tags: [], createdAt: '', updatedAt: '' },
+    { id: 't3', title: 'T3', category: 'Work', priority: 'medium', status: 'in_progress', estimatedDuration: 30, actualDuration: 0, tags: [], createdAt: '', updatedAt: '' },
+  ];
+
+  const taskProg = calculateGoalProgress(taskGoal, [], tasks, [], [], []);
+  assert.equal(taskProg.currentValue, 2); // 2 of 5 completed
+  assert.equal(taskProg.percentage, 40);
+
+  // 2. Milestone goal
+  const milestoneGoal: Goal = {
+    id: 'goal-ms',
+    title: 'Product Launch',
+    category: 'Work',
+    horizon: 'six_month',
+    startDate: '2026-10-01',
+    targetDate: '2026-12-31',
+    priority: 'urgent',
+    goalType: 'milestone',
+    targetValue: 100,
+    currentValue: 0,
+    unit: '%',
+    progressMethod: 'milestones',
+    linkedCategories: [],
+    linkedHabitIds: [],
+    linkedTaskIds: [],
+    status: 'in_progress',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const milestones: GoalMilestone[] = [
+    { id: 'm1', goalId: 'goal-ms', title: 'Alpha Release', weight: 1, isCompleted: true, createdAt: '' },
+    { id: 'm2', goalId: 'goal-ms', title: 'Beta Release', weight: 1, isCompleted: true, createdAt: '' },
+    { id: 'm3', goalId: 'goal-ms', title: 'Security Audit', weight: 1, isCompleted: false, createdAt: '' },
+    { id: 'm4', goalId: 'goal-ms', title: 'General Availability', weight: 1, isCompleted: false, createdAt: '' },
+  ];
+
+  const msProg = calculateGoalProgress(milestoneGoal, [], [], [], milestones, []);
+  assert.equal(msProg.currentValue, 50); // 2 of 4 milestones = 50%
+  assert.equal(msProg.percentage, 50);
+});
+
+test('TEST 9: Bidirectional linking consistency: linking task updates goal progress, unlinking drops contribution', () => {
+  const goal: Goal = {
+    id: 'goal-bidirectional',
+    title: 'Build Feature Set',
+    category: 'Work',
+    horizon: 'monthly',
+    startDate: '2026-10-01',
+    targetDate: '2026-10-31',
+    priority: 'high',
+    goalType: 'duration',
+    targetValue: 10,
+    currentValue: 0,
+    unit: 'hours',
+    progressMethod: 'automatic_time',
+    linkedCategories: [],
+    linkedHabitIds: [],
+    linkedTaskIds: [], // initially empty
+    status: 'in_progress',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const task: Task = {
+    id: 'task-feature-x',
+    title: 'Implement Auth Flow',
+    category: 'Work',
+    priority: 'high',
+    status: 'completed',
+    estimatedDuration: 180,
+    actualDuration: 180, // 3 hours
+    dueDate: '2026-10-15',
+    linkedGoalId: undefined, // initially unlinked
+    tags: [],
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  // Initially unlinked: progress is 0
+  const progInitial = calculateGoalProgress(goal, [], [task], [], [], []);
+  assert.equal(progInitial.currentValue, 0);
+
+  // Link task: either task.linkedGoalId or goal.linkedTaskIds
+  const linkedTask: Task = { ...task, linkedGoalId: 'goal-bidirectional' };
+  const progLinkedViaTask = calculateGoalProgress(goal, [], [linkedTask], [], [], []);
+  assert.equal(progLinkedViaTask.currentValue, 3.0);
+  assert.equal(progLinkedViaTask.percentage, 30);
+
+  // Link via goal.linkedTaskIds
+  const goalWithTask: Goal = { ...goal, linkedTaskIds: ['task-feature-x'] };
+  const progLinkedViaGoal = calculateGoalProgress(goalWithTask, [], [task], [], [], []);
+  assert.equal(progLinkedViaGoal.currentValue, 3.0);
+
+  // Both linked together
+  const progBothLinked = calculateGoalProgress(goalWithTask, [], [linkedTask], [], [], []);
+  assert.equal(progBothLinked.currentValue, 3.0); // No double counting
+
+  // Unlink again
+  const progUnlinked = calculateGoalProgress(goal, [], [task], [], [], []);
+  assert.equal(progUnlinked.currentValue, 0);
+});
+

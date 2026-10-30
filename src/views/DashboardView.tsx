@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   CheckCircle2,
   Clock,
@@ -21,6 +21,7 @@ import { StatCard } from '../components/StatCard';
 import { ScoreModal } from '../components/ScoreModal';
 import { ConfirmModal } from '../components/ConfirmModal';
 import {
+  calculateGoalProgress,
   calculateHabitCompletionRate,
   calculateHabitStreak,
   calculateProductivityScore,
@@ -113,6 +114,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
     .filter((g) => g.status === 'in_progress')
     .slice(0, 3);
 
+  // Single source of truth live goal progress calculation
+  const goalProgressMap = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof calculateGoalProgress>>();
+    goals.forEach((g) => {
+      map.set(
+        g.id,
+        calculateGoalProgress(g, timeSessions, tasks, occurrences, milestones, scheduleBlocks)
+      );
+    });
+    return map;
+  }, [goals, timeSessions, tasks, occurrences, milestones, scheduleBlocks]);
+
   // Rule-based insights
   const insights = generateDeterministicInsights({
     todayTasksCompleted: taskMetrics.completed,
@@ -122,11 +135,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
     todayTrackedMinutes,
     todayPlannedMinutes: schedMetrics.totalPlannedMinutes,
     topHabitStreak: topStreakHabit,
-    activeGoals: activeGoals.map((g) => ({
-      title: g.title,
-      remaining: Math.max(0, g.targetValue - g.currentValue),
-      unit: g.unit,
-    })),
+    activeGoals: activeGoals.map((g) => {
+      const prog = goalProgressMap.get(g.id);
+      return {
+        title: g.title,
+        remaining: prog ? prog.remaining : Math.max(0, g.targetValue - g.currentValue),
+        unit: g.unit,
+      };
+    }),
   });
 
   const parsedDate = parseDate(selectedDate);
@@ -627,8 +643,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
             ) : (
               <div className="space-y-3">
                 {activeGoals.map((goal) => {
-                  const target = goal.targetValue || 1;
-                  const pct = Math.min(100, Math.round((goal.currentValue / target) * 100));
+                  const prog = goalProgressMap.get(goal.id) || {
+                    currentValue: goal.currentValue,
+                    percentage: Math.min(100, Math.round((goal.currentValue / (goal.targetValue || 1)) * 100)),
+                    remaining: Math.max(0, (goal.targetValue || 1) - goal.currentValue),
+                    isCompleted: false,
+                    paceStatus: 'not_started' as const,
+                  };
 
                   return (
                     <div
@@ -644,20 +665,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
                             {goal.horizon} • {goal.category}
                           </span>
                         </div>
-                        <span className="text-xs font-bold text-indigo-400">{pct}%</span>
+                        <span className="text-xs font-bold text-indigo-400">{prog.percentage}%</span>
                       </div>
 
                       {/* Progress bar */}
                       <div className="w-full bg-neutral-800 h-2 rounded-full overflow-hidden">
                         <div
-                          className="bg-indigo-500 h-full rounded-full transition-all duration-300"
-                          style={{ width: `${pct}%` }}
+                          className={`h-full rounded-full transition-all duration-300 ${
+                            prog.isCompleted ? 'bg-emerald-500' : 'bg-indigo-500'
+                          }`}
+                          style={{ width: `${prog.percentage}%` }}
                         />
                       </div>
 
                       <div className="flex items-center justify-between text-[11px] text-neutral-400">
-                        <span>
-                          {goal.currentValue} / {goal.targetValue} {goal.unit}
+                        <span className="font-mono text-neutral-300">
+                          {prog.currentValue} / {goal.targetValue} {goal.unit}
                         </span>
                         <span>Deadline: {goal.targetDate}</span>
                       </div>

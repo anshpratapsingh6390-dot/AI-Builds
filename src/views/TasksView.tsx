@@ -502,6 +502,44 @@ export const TasksView: React.FC = () => {
                   />
                 </div>
               </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-300 mb-1 flex items-center gap-1.5">
+                    <Target className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Linked Goal</span>
+                  </label>
+                  <select
+                    value={editingTask.linkedGoalId || ''}
+                    onChange={(e) =>
+                      setEditingTask({ ...editingTask, linkedGoalId: e.target.value || undefined })
+                    }
+                    className="w-full px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800 text-neutral-100 text-xs"
+                  >
+                    <option value="">None (Independent task)</option>
+                    {goals.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.title} ({g.horizon} • {g.category})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-300 mb-1 flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Due Date</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={editingTask.dueDate || ''}
+                    onChange={(e) =>
+                      setEditingTask({ ...editingTask, dueDate: e.target.value || undefined })
+                    }
+                    className="w-full px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800 text-neutral-100 text-xs"
+                  />
+                </div>
+              </div>
             </div>
 
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-neutral-800">
