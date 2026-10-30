@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   BarChart3,
   Calendar,
@@ -20,6 +20,8 @@ import {
   calculateProductivityScore,
   calculateScheduleAdherence,
   calculateTaskCompletionRate,
+  calculatePeriodWorkingTime,
+  calculateCreditedWorkingTime,
   generateDeterministicInsights,
 } from '../utils/rules';
 import {
@@ -136,7 +138,11 @@ export const AnalyticsView: React.FC = () => {
       ? Math.round((totalCompletedHabitSlots / totalScheduledHabitSlots) * 100)
       : null;
 
-  const totalTrackedMinutes = periodSessions.reduce((sum, s) => sum + s.durationMinutes, 0);
+  const periodWorkingTime = useMemo(() => {
+    return calculatePeriodWorkingTime(startDateStr, endDateStr, scheduleBlocks, timeSessions, tasks);
+  }, [startDateStr, endDateStr, scheduleBlocks, timeSessions, tasks]);
+
+  const totalTrackedMinutes = periodWorkingTime.totalTrackedMinutes;
 
   // Productivity score for the period
   const scoreResult = calculateProductivityScore(
@@ -146,26 +152,19 @@ export const AnalyticsView: React.FC = () => {
     settings.productivityWeights
   );
 
-  // Category distribution
-  const categoryDistribution = new Map<string, number>();
-  periodSessions.forEach((s) => {
-    const prev = categoryDistribution.get(s.category) || 0;
-    categoryDistribution.set(s.category, prev + s.durationMinutes);
-  });
+  // Category distribution using unified credited working time
+  const categoryDistribution = periodWorkingTime.categoryBreakdown;
 
   // Daily trend data for weekly view
   const weeklyDayData = daysInPeriod.map((dStr) => {
     const d = parseDate(dStr);
-    const daySessions = periodSessions.filter((s) => s.startTime.startsWith(dStr));
-    const dayTrackedMin = daySessions.reduce((sum, s) => sum + s.durationMinutes, 0);
-    const dayBlocks = periodBlocks.filter((b) => b.date === dStr);
-    const dayPlannedMin = dayBlocks.reduce((sum, b) => sum + (b.plannedDuration || 0), 0);
+    const dayMetrics = periodWorkingTime.dayBreakdown.get(dStr) || calculateCreditedWorkingTime(dStr, scheduleBlocks, timeSessions, tasks);
     return {
       date: dStr,
       label: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()],
       dayNum: d.getDate(),
-      trackedMinutes: dayTrackedMin,
-      plannedMinutes: dayPlannedMin,
+      trackedMinutes: dayMetrics.totalTrackedMinutes,
+      plannedMinutes: dayMetrics.totalPlannedMinutes,
     };
   });
 
@@ -381,7 +380,7 @@ export const AnalyticsView: React.FC = () => {
             </p>
           ) : (
             <div className="space-y-3">
-              {Array.from(categoryDistribution.entries())
+              {(Array.from(categoryDistribution.entries()) as [string, number][])
                 .sort((a, b) => b[1] - a[1])
                 .map(([cat, minutes]) => {
                   const pct =

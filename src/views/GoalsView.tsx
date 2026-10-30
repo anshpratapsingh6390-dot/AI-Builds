@@ -403,13 +403,52 @@ export const GoalsView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Linked Records Summary */}
-              <div className="pt-2 border-t border-neutral-800/80 text-xs text-neutral-400 space-y-1.5">
-                <div className="font-semibold text-neutral-300">Single Source of Truth Links</div>
-                <p className="text-[11px] leading-relaxed">
-                  Working hours, tasks, or habits tagged with {selectedGoal.category} automatically update
-                  this goal without duplicate manual input.
-                </p>
+              {/* Contributing Linked Tasks in Goal Inspector */}
+              <div className="pt-2 border-t border-neutral-800/80 space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-300">
+                    Contributing Tasks
+                  </h4>
+                  <span className="text-[10px] text-neutral-500 font-mono">
+                    {tasks.filter((t) => (selectedGoal.linkedTaskIds || []).includes(t.id) || t.linkedGoalId === selectedGoal.id).length} linked
+                  </span>
+                </div>
+
+                {(() => {
+                  const goalLinkedTasks = tasks.filter(
+                    (t) => (selectedGoal.linkedTaskIds || []).includes(t.id) || t.linkedGoalId === selectedGoal.id
+                  );
+                  if (goalLinkedTasks.length === 0) {
+                    return (
+                      <p className="text-[11px] text-neutral-500 italic p-2 rounded-lg bg-neutral-950">
+                        No tasks explicitly linked yet. Edit goal to link tasks.
+                      </p>
+                    );
+                  }
+                  return (
+                    <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                      {goalLinkedTasks.map((t) => (
+                        <div
+                          key={t.id}
+                          className="p-2 rounded-lg bg-neutral-950 border border-neutral-850 flex items-center justify-between text-xs"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="font-medium text-neutral-200 truncate">{t.title}</span>
+                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-neutral-800 text-neutral-400">
+                              {t.category}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0 text-[11px]">
+                            <span className="font-mono text-neutral-400">{t.actualDuration || 0}m</span>
+                            {t.status === 'completed' && (
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           ) : (

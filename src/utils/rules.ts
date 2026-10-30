@@ -239,11 +239,228 @@ export function calculateTaskCompletionRate(tasks: Task[]): {
 }
 
 /**
+ * Unified Credited Block Time details.
+ */
+export interface CreditedBlockTime {
+  blockId: string;
+  blockTitle: string;
+  category: string;
+  plannedMinutes: number;
+  actualTimerMinutes: number;
+  creditedMinutes: number;
+  status: ScheduleBlock['status'];
+  source: 'timer' | 'actual_recorded' | 'planned_completion' | 'none';
+}
+
+/**
+ * Unified Working Time Metrics for a single date.
+ */
+export interface DayWorkingTimeMetrics {
+  totalTrackedMinutes: number;       // Total credited working time
+  totalPlannedMinutes: number;       // Planned time of all eligible schedule blocks
+  completedPlannedMinutes: number;   // Planned time of completed blocks
+  remainingScheduledMinutes: number; // Planned time of incomplete blocks
+  varianceMinutes: number;           // totalTrackedMinutes - totalPlannedMinutes
+  scheduleCreditedMinutes: number;   // Credited time coming from schedule blocks
+  standaloneSessionMinutes: number;  // Minutes coming from independent time sessions
+  blockBreakdown: CreditedBlockTime[];
+  categoryBreakdown: Map<string, number>;
+}
+
+/**
+ * Calculates unified credited working time for a specific date according to strict rules:
+ * Rule A: Completed task without timer -> Credited = planned duration
+ * Rule B: Completed task with timer -> Credited = actual timer-recorded duration
+ * Rule C: Incomplete task without timer -> Credited = 0
+ * Rule D: Incomplete task with timer -> Credited = actual timer-recorded duration
+ * Rule E: Manually recorded / Standalone time entries -> Credited to total without double counting
+ */
+export function calculateCreditedWorkingTime(
+  dateStr: string,
+  scheduleBlocks: ScheduleBlock[],
+  timeSessions: TimeSession[],
+  tasks: Task[] = []
+): DayWorkingTimeMetrics {
+  // 1. Filter schedule blocks for dateStr (excluding cancelled)
+  const dayBlocks = scheduleBlocks.filter(
+    (b) => b.date === dateStr && b.status !== 'cancelled'
+  );
+
+  // 2. Filter time sessions for dateStr
+  const daySessions = timeSessions.filter(
+    (s) => s.startTime.slice(0, 10) === dateStr
+  );
+
+  const seenSessionIds = new Set<string>();
+  const categoryBreakdown = new Map<string, number>();
+
+  let totalPlannedMinutes = 0;
+  let completedPlannedMinutes = 0;
+  let remainingScheduledMinutes = 0;
+  let scheduleCreditedMinutes = 0;
+
+  const blockBreakdown: CreditedBlockTime[] = [];
+
+  for (const block of dayBlocks) {
+    const planned =
+      block.plannedDuration ||
+      Math.max(0, timeToMinutes(block.endTime) - timeToMinutes(block.startTime));
+    totalPlannedMinutes += planned;
+
+    if (block.status === 'completed') {
+      completedPlannedMinutes += planned;
+    } else {
+      remainingScheduledMinutes += planned;
+    }
+
+    // Find time sessions matching this block
+    const matchingSessions = daySessions.filter(
+      (s) =>
+        s.linkedScheduleBlockId === block.id ||
+        (block.linkedTaskId && s.linkedTaskId === block.linkedTaskId)
+    );
+
+    matchingSessions.forEach((s) => seenSessionIds.add(s.id));
+    const timerMins = matchingSessions.reduce((sum, s) => sum + s.durationMinutes, 0);
+
+    // Also consider block.actualDuration if manually entered/recorded on block
+    const actualRecorded = timerMins > 0 ? timerMins : (block.actualDuration || 0);
+
+    let credited = 0;
+    let source: CreditedBlockTime['source'] = 'none';
+
+    if (block.status === 'completed') {
+      if (actualRecorded > 0) {
+        // Rule B: Completed task with timer / actual recorded
+        credited = actualRecorded;
+        source = timerMins > 0 ? 'timer' : 'actual_recorded';
+      } else {
+        // Rule A: Completed task without timer
+        credited = planned;
+        source = 'planned_completion';
+      }
+    } else {
+      // Incomplete block (scheduled, in_progress, skipped)
+      if (actualRecorded > 0) {
+        // Rule D: Incomplete task with timer / actual recorded
+        credited = actualRecorded;
+        source = timerMins > 0 ? 'timer' : 'actual_recorded';
+      } else {
+        // Rule C: Incomplete task without timer
+        credited = 0;
+        source = 'none';
+      }
+    }
+
+    scheduleCreditedMinutes += credited;
+    if (credited > 0) {
+      const prevCat = categoryBreakdown.get(block.category) || 0;
+      categoryBreakdown.set(block.category, prevCat + credited);
+    }
+
+    blockBreakdown.push({
+      blockId: block.id,
+      blockTitle: block.title,
+      category: block.category,
+      plannedMinutes: planned,
+      actualTimerMinutes: timerMins,
+      creditedMinutes: credited,
+      status: block.status,
+      source,
+    });
+  }
+
+  // 3. Independent / Standalone time sessions (Rule E)
+  let standaloneSessionMinutes = 0;
+  for (const s of daySessions) {
+    if (!seenSessionIds.has(s.id)) {
+      seenSessionIds.add(s.id);
+      standaloneSessionMinutes += s.durationMinutes;
+      const prevCat = categoryBreakdown.get(s.category) || 0;
+      categoryBreakdown.set(s.category, prevCat + s.durationMinutes);
+    }
+  }
+
+  const totalTrackedMinutes = scheduleCreditedMinutes + standaloneSessionMinutes;
+  const varianceMinutes = totalTrackedMinutes - totalPlannedMinutes;
+
+  return {
+    totalTrackedMinutes,
+    totalPlannedMinutes,
+    completedPlannedMinutes,
+    remainingScheduledMinutes,
+    varianceMinutes,
+    scheduleCreditedMinutes,
+    standaloneSessionMinutes,
+    blockBreakdown,
+    categoryBreakdown,
+  };
+}
+
+/**
+ * Aggregates credited working time across a date range.
+ */
+export function calculatePeriodWorkingTime(
+  startDateStr: string,
+  endDateStr: string,
+  scheduleBlocks: ScheduleBlock[],
+  timeSessions: TimeSession[],
+  tasks: Task[] = []
+): {
+  totalTrackedMinutes: number;
+  totalPlannedMinutes: number;
+  varianceMinutes: number;
+  categoryBreakdown: Map<string, number>;
+  dayBreakdown: Map<string, DayWorkingTimeMetrics>;
+} {
+  const dayBreakdown = new Map<string, DayWorkingTimeMetrics>();
+  const categoryBreakdown = new Map<string, number>();
+  let totalTrackedMinutes = 0;
+  let totalPlannedMinutes = 0;
+
+  const dates = new Set<string>();
+  scheduleBlocks.forEach((b) => {
+    if (b.date >= startDateStr && b.date <= endDateStr) dates.add(b.date);
+  });
+  timeSessions.forEach((s) => {
+    const d = s.startTime.slice(0, 10);
+    if (d >= startDateStr && d <= endDateStr) dates.add(d);
+  });
+
+  if (dates.size === 0) {
+    dates.add(startDateStr);
+  }
+
+  for (const d of dates) {
+    const dayMetrics = calculateCreditedWorkingTime(d, scheduleBlocks, timeSessions, tasks);
+    dayBreakdown.set(d, dayMetrics);
+    totalTrackedMinutes += dayMetrics.totalTrackedMinutes;
+    totalPlannedMinutes += dayMetrics.totalPlannedMinutes;
+
+    dayMetrics.categoryBreakdown.forEach((mins, cat) => {
+      const prev = categoryBreakdown.get(cat) || 0;
+      categoryBreakdown.set(cat, prev + mins);
+    });
+  }
+
+  return {
+    totalTrackedMinutes,
+    totalPlannedMinutes,
+    varianceMinutes: totalTrackedMinutes - totalPlannedMinutes,
+    categoryBreakdown,
+    dayBreakdown,
+  };
+}
+
+/**
  * Schedule Adherence:
  * Evaluates whether planned schedule blocks were executed with actual duration recorded,
  * or completed on time without severe variance.
  */
-export function calculateScheduleAdherence(blocks: ScheduleBlock[]): {
+export function calculateScheduleAdherence(
+  blocks: ScheduleBlock[],
+  timeSessions: TimeSession[] = []
+): {
   adherenceRate: number | null;
   totalPlannedMinutes: number;
   totalActualMinutes: number;
@@ -269,7 +486,20 @@ export function calculateScheduleAdherence(blocks: ScheduleBlock[]): {
 
   for (const block of eligible) {
     const planned = block.plannedDuration || Math.max(0, timeToMinutes(block.endTime) - timeToMinutes(block.startTime));
-    const actual = block.actualDuration || 0;
+    
+    // Find matching sessions if timeSessions provided
+    const matchingSessions = timeSessions.filter(
+      (s) =>
+        s.linkedScheduleBlockId === block.id ||
+        (block.linkedTaskId && s.linkedTaskId === block.linkedTaskId)
+    );
+    const timerMins = matchingSessions.reduce((sum, s) => sum + s.durationMinutes, 0);
+    const actualWorked = timerMins > 0 ? timerMins : (block.actualDuration || 0);
+
+    const actual = block.status === 'completed'
+      ? (actualWorked > 0 ? actualWorked : planned)
+      : actualWorked;
+
     totalPlannedMinutes += planned;
     totalActualMinutes += actual;
 
@@ -489,38 +719,60 @@ export function calculateGoalProgress(
         }
       }
 
-      // 3. Process explicit Tasks' recorded actual duration without double counting
+      // 3. Process explicit Tasks' recorded actual duration or completion planned duration without double counting
       for (const t of tasks) {
         if (!explicitlyLinkedTaskIds.has(t.id)) continue;
 
-        if (goal.startDate && t.dueDate && t.dueDate < goal.startDate) continue;
-        if (goal.targetDate && t.dueDate && t.dueDate > goal.targetDate) continue;
+        const sessionMins = sessionMinutesByTask.get(t.id) || 0;
+        let taskCredited = t.actualDuration || 0;
+        if (t.status === 'completed' && taskCredited === 0) {
+          taskCredited = t.estimatedDuration || 0;
+        }
 
-        const recordedMinutes = t.actualDuration || 0;
-        const alreadyCountedMinutes = sessionMinutesByTask.get(t.id) || 0;
-
-        if (recordedMinutes > alreadyCountedMinutes) {
-          totalMinutes += (recordedMinutes - alreadyCountedMinutes);
+        if (taskCredited > sessionMins) {
+          totalMinutes += (taskCredited - sessionMins);
         }
       }
 
-      // 4. Process completed schedule blocks linked to goal or linked tasks
+      // 4. Process schedule blocks linked to goal, linked tasks, or matching goal title
       for (const b of scheduleBlocks) {
-        if (b.status !== 'completed' || !b.actualDuration || b.actualDuration <= 0) continue;
-
         if (goal.startDate && b.date && b.date < goal.startDate) continue;
         if (goal.targetDate && b.date && b.date > goal.targetDate) continue;
 
         const isBlockDirectGoal = b.linkedGoalId === goal.id;
         const isBlockLinkedTask = Boolean(b.linkedTaskId && explicitlyLinkedTaskIds.has(b.linkedTaskId));
+        const isBlockTitleMatch = !hasExplicitLinks && b.title.trim().toLowerCase() === goal.title.trim().toLowerCase();
 
-        if (isBlockDirectGoal || isBlockLinkedTask) {
-          const linkedTask = b.linkedTaskId ? tasks.find((t) => t.id === b.linkedTaskId) : null;
-          const taskAlreadyCounted = linkedTask && (linkedTask.actualDuration || 0) >= b.actualDuration;
-          if (!taskAlreadyCounted) {
-            const sessionForBlock = timeSessions.some((s) => s.linkedScheduleBlockId === b.id && seenSessions.has(s.id));
-            if (!sessionForBlock) {
-              totalMinutes += b.actualDuration;
+        if (isBlockDirectGoal || isBlockLinkedTask || isBlockTitleMatch) {
+          const matchingSessions = timeSessions.filter(
+            (s) =>
+              (s.linkedScheduleBlockId === b.id || (b.linkedTaskId && s.linkedTaskId === b.linkedTaskId)) &&
+              seenSessions.has(s.id)
+          );
+          const blockSessionMins = matchingSessions.reduce((sum, s) => sum + s.durationMinutes, 0);
+
+          const planned = b.plannedDuration || Math.max(0, timeToMinutes(b.endTime) - timeToMinutes(b.startTime));
+          const actualWorked = blockSessionMins > 0 ? blockSessionMins : (b.actualDuration || 0);
+
+          let blockCredited = 0;
+          if (b.status === 'completed') {
+            blockCredited = actualWorked > 0 ? actualWorked : planned;
+          } else {
+            blockCredited = actualWorked;
+          }
+
+          if (b.linkedTaskId && explicitlyLinkedTaskIds.has(b.linkedTaskId)) {
+            const linkedTask = tasks.find((t) => t.id === b.linkedTaskId);
+            const taskActual = linkedTask?.actualDuration || 0;
+            const taskEstimated = linkedTask?.status === 'completed' ? (linkedTask?.estimatedDuration || 0) : 0;
+            const taskAlreadyContributed = Math.max(taskActual, taskEstimated, blockSessionMins);
+
+            if (blockCredited > taskAlreadyContributed) {
+              totalMinutes += (blockCredited - taskAlreadyContributed);
+            }
+          } else {
+            if (blockCredited > blockSessionMins) {
+              totalMinutes += (blockCredited - blockSessionMins);
             }
           }
         }
@@ -532,7 +784,7 @@ export function calculateGoalProgress(
       const isMinutes = unitLower === 'minutes' || unitLower === 'minute' || unitLower === 'm' || unitLower === 'min' || unitLower === 'mins';
 
       if (isHours || (!isMinutes && goal.goalType === 'duration')) {
-        currentValue = Math.round((totalMinutes / 60) * 10) / 10;
+        currentValue = Math.round((totalMinutes / 60) * 100) / 100;
       } else {
         currentValue = totalMinutes;
       }
@@ -552,8 +804,6 @@ export function calculateGoalProgress(
 
       const linked = tasks.filter((t) => {
         if (!explicitlyLinkedTaskIds.has(t.id)) return false;
-        if (goal.startDate && t.dueDate && t.dueDate < goal.startDate) return false;
-        if (goal.targetDate && t.dueDate && t.dueDate > goal.targetDate) return false;
         return t.status === 'completed';
       });
       currentValue = linked.length;
@@ -597,8 +847,9 @@ export function calculateGoalProgress(
   }
 
   const target = goal.targetValue > 0 ? goal.targetValue : 1;
-  const percentage = Math.min(100, Math.max(0, Math.round((currentValue / target) * 100)));
-  const remaining = Math.max(0, Math.round((target - currentValue) * 10) / 10);
+  const rawPct = (currentValue / target) * 100;
+  const percentage = Math.min(100, Math.max(0, Math.round(rawPct * 100) / 100));
+  const remaining = Math.max(0, Math.round((target - currentValue) * 100) / 100);
   const isCompleted = currentValue >= target;
 
   // Pace status calculation

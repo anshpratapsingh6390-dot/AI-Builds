@@ -47,6 +47,8 @@ interface LifeOSContextType {
   stopAndSaveTimer: (notes?: string) => Promise<void>;
   discardTimer: () => void;
   recordManualTime: (session: Omit<TimeSession, 'id' | 'createdAt'>) => Promise<void>;
+  updateTimeSession: (id: string, updates: Partial<TimeSession>) => Promise<void>;
+  deleteTimeSession: (id: string) => Promise<void>;
 
   // Task Mutations
   addTask: (task: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>) => Promise<string>;
@@ -298,15 +300,9 @@ export const LifeOSProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     await db.timeSessions.put(newSession);
 
-    // If linked to a task, update task's actualDuration
+    // If linked to a task, recalculate task's authoritative actualDuration
     if (activeTimer.linkedTaskId) {
-      const task = await db.tasks.get(activeTimer.linkedTaskId);
-      if (task) {
-        await db.tasks.update(task.id, {
-          actualDuration: (task.actualDuration || 0) + durationMinutes,
-          updatedAt: new Date().toISOString(),
-        });
-      }
+      await recalculateTaskActualDuration(activeTimer.linkedTaskId);
     }
 
     // If linked to a habit, update or create today's habit occurrence duration
@@ -343,6 +339,20 @@ export const LifeOSProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setTimerElapsedSeconds(0);
   }, [saveTimerToSettings]);
 
+  const recalculateTaskActualDuration = async (taskId: string) => {
+    const sessions = await db.timeSessions.where('linkedTaskId').equals(taskId).toArray();
+    const totalSessionMins = sessions.reduce((sum, s) => sum + s.durationMinutes, 0);
+    const blocks = await db.scheduleBlocks.where('linkedTaskId').equals(taskId).toArray();
+    const blockMins = blocks
+      .filter((b) => b.status === 'completed' && (b.actualDuration || 0) > 0)
+      .reduce((sum, b) => sum + (b.actualDuration || 0), 0);
+    const total = Math.max(totalSessionMins, blockMins);
+    await db.tasks.update(taskId, {
+      actualDuration: total,
+      updatedAt: new Date().toISOString(),
+    });
+  };
+
   const recordManualTime = useCallback(async (session: Omit<TimeSession, 'id' | 'createdAt'>) => {
     const newSession: TimeSession = {
       ...session,
@@ -353,13 +363,35 @@ export const LifeOSProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     // Update task duration if linked
     if (newSession.linkedTaskId) {
-      const task = await db.tasks.get(newSession.linkedTaskId);
-      if (task) {
-        await db.tasks.update(task.id, {
-          actualDuration: (task.actualDuration || 0) + newSession.durationMinutes,
-          updatedAt: new Date().toISOString(),
-        });
-      }
+      await recalculateTaskActualDuration(newSession.linkedTaskId);
+    }
+
+    await refreshAll();
+  }, [refreshAll]);
+
+  const updateTimeSession = useCallback(async (id: string, updates: Partial<TimeSession>) => {
+    const current = await db.timeSessions.get(id);
+    if (!current) return;
+    await db.timeSessions.update(id, updates);
+
+    const affectedTaskIds = new Set<string>();
+    if (current.linkedTaskId) affectedTaskIds.add(current.linkedTaskId);
+    if (updates.linkedTaskId) affectedTaskIds.add(updates.linkedTaskId);
+
+    for (const taskId of affectedTaskIds) {
+      await recalculateTaskActualDuration(taskId);
+    }
+
+    await refreshAll();
+  }, [refreshAll]);
+
+  const deleteTimeSession = useCallback(async (id: string) => {
+    const current = await db.timeSessions.get(id);
+    if (!current) return;
+    await db.timeSessions.delete(id);
+
+    if (current.linkedTaskId) {
+      await recalculateTaskActualDuration(current.linkedTaskId);
     }
 
     await refreshAll();
@@ -703,6 +735,16 @@ export const LifeOSProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // Bidirectional sync: set linkedGoalId on all linked tasks
     if (Array.isArray(newGoal.linkedTaskIds) && newGoal.linkedTaskIds.length > 0) {
       for (const taskId of newGoal.linkedTaskIds) {
+        const t = await db.tasks.get(taskId);
+        if (t && t.linkedGoalId && t.linkedGoalId !== id) {
+          const oldGoal = await db.goals.get(t.linkedGoalId);
+          if (oldGoal && Array.isArray(oldGoal.linkedTaskIds)) {
+            await db.goals.update(oldGoal.id, {
+              linkedTaskIds: oldGoal.linkedTaskIds.filter((tid) => tid !== taskId),
+              updatedAt: now,
+            });
+          }
+        }
         await db.tasks.update(taskId, { linkedGoalId: id, updatedAt: now });
       }
     }
@@ -731,8 +773,18 @@ export const LifeOSProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       }
 
-      // Tasks newly added to this goal
+      // Tasks newly added to this goal (handle moving from another goal)
       for (const nextId of nextTaskIds) {
+        const t = await db.tasks.get(nextId);
+        if (t && t.linkedGoalId && t.linkedGoalId !== id) {
+          const oldGoal = await db.goals.get(t.linkedGoalId);
+          if (oldGoal && Array.isArray(oldGoal.linkedTaskIds)) {
+            await db.goals.update(oldGoal.id, {
+              linkedTaskIds: oldGoal.linkedTaskIds.filter((tid) => tid !== nextId),
+              updatedAt: now,
+            });
+          }
+        }
         await db.tasks.update(nextId, { linkedGoalId: id, updatedAt: now });
       }
     }
@@ -943,6 +995,8 @@ export const LifeOSProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       stopAndSaveTimer,
       discardTimer,
       recordManualTime,
+      updateTimeSession,
+      deleteTimeSession,
       addTask,
       updateTask,
       deleteTask,
@@ -1004,6 +1058,8 @@ export const LifeOSProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       stopAndSaveTimer,
       discardTimer,
       recordManualTime,
+      updateTimeSession,
+      deleteTimeSession,
       addTask,
       updateTask,
       deleteTask,

@@ -8,6 +8,8 @@ import {
   calculateProductivityScore,
   calculateGoalProgress,
   isHabitScheduledOnDate,
+  calculateCreditedWorkingTime,
+  calculatePeriodWorkingTime,
 } from './rules';
 import { checkTimeOverlap, formatDuration, timeToMinutes, minutesToTime } from './dateUtils';
 import { Habit, Task, ScheduleBlock, Goal, TimeSession, GoalMilestone, HabitOccurrence } from '../types';
@@ -885,4 +887,629 @@ test('TEST 9: Bidirectional linking consistency: linking task updates goal progr
   const progUnlinked = calculateGoalProgress(goal, [], [task], [], [], []);
   assert.equal(progUnlinked.currentValue, 0);
 });
+
+/* ==========================================================================
+   TARGETED BUG FIX: TESTS 10 TO 14 (EXACT PROMPT REQUIREMENTS)
+   ========================================================================== */
+
+test('TEST 10: 60m actual work updates 15h goal to exactly 1h (6.67%), 14h remaining', () => {
+  const goal: Goal = {
+    id: 'goal-js-series',
+    title: 'Complete JavaScript Series',
+    category: 'Coding',
+    horizon: 'weekly',
+    startDate: '2026-10-25',
+    targetDate: '2026-10-31',
+    priority: 'high',
+    goalType: 'duration',
+    targetValue: 15,
+    currentValue: 0,
+    unit: 'hours',
+    progressMethod: 'automatic_time',
+    linkedCategories: ['Coding'],
+    linkedHabitIds: [],
+    linkedTaskIds: ['task-js-lectures', 'task-dsa', 'task-js-practice'],
+    status: 'in_progress',
+    createdAt: '2026-10-25T08:00:00Z',
+    updatedAt: '2026-10-25T08:00:00Z',
+  };
+
+  const taskLectures: Task = {
+    id: 'task-js-lectures',
+    title: 'JavaScript lectures',
+    category: 'Coding',
+    priority: 'high',
+    status: 'in_progress',
+    estimatedDuration: 90,
+    actualDuration: 60, // 60 minutes recorded
+    linkedGoalId: 'goal-js-series',
+    tags: [],
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const taskDSA: Task = {
+    id: 'task-dsa',
+    title: 'DSA',
+    category: 'Coding',
+    priority: 'medium',
+    status: 'not_started',
+    estimatedDuration: 60,
+    actualDuration: 0, // 0 minutes
+    linkedGoalId: 'goal-js-series',
+    tags: [],
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const taskPractice: Task = {
+    id: 'task-js-practice',
+    title: 'JavaScript practice',
+    category: 'Coding',
+    priority: 'high',
+    status: 'not_started',
+    estimatedDuration: 60,
+    actualDuration: 0, // 0 minutes
+    linkedGoalId: 'goal-js-series',
+    tags: [],
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  // With 60m on JavaScript lectures:
+  // Completed: 1 hour
+  // Target: 15 hours
+  // Remaining: 14 hours
+  // Progress: 6.67%
+  const prog1 = calculateGoalProgress(goal, [], [taskLectures, taskDSA, taskPractice], [], [], []);
+  assert.equal(prog1.currentValue, 1.0);
+  assert.equal(prog1.percentage, 6.67);
+  assert.equal(prog1.remaining, 14.0);
+  assert.equal(prog1.isCompleted, false);
+
+  // Subsequently record another 30m on DSA:
+  const updatedTaskDSA: Task = {
+    ...taskDSA,
+    actualDuration: 30,
+  };
+
+  // Completed: 1.5 hours
+  // Target: 15 hours
+  // Remaining: 13.5 hours
+  // Progress: 10%
+  const prog2 = calculateGoalProgress(goal, [], [taskLectures, updatedTaskDSA, taskPractice], [], [], []);
+  assert.equal(prog2.currentValue, 1.5);
+  assert.equal(prog2.percentage, 10);
+  assert.equal(prog2.remaining, 13.5);
+  assert.equal(prog2.isCompleted, false);
+});
+
+test('TEST 11: Linking a task with 0m actual work shows 0m and does NOT artificially increase progress', () => {
+  const goal: Goal = {
+    id: 'goal-empty-work',
+    title: 'Build Microservice',
+    category: 'Work',
+    horizon: 'weekly',
+    startDate: '2026-10-25',
+    targetDate: '2026-10-31',
+    priority: 'high',
+    goalType: 'duration',
+    targetValue: 10,
+    currentValue: 0,
+    unit: 'hours',
+    progressMethod: 'automatic_time',
+    linkedCategories: ['Work'],
+    linkedHabitIds: [],
+    linkedTaskIds: ['task-zero-work'],
+    status: 'in_progress',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const taskZero: Task = {
+    id: 'task-zero-work',
+    title: 'Setup Kubernetes Cluster',
+    category: 'Work',
+    priority: 'urgent',
+    status: 'not_started',
+    estimatedDuration: 180, // estimated 3 hours
+    actualDuration: 0, // 0 minutes actual
+    linkedGoalId: 'goal-empty-work',
+    tags: [],
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const prog = calculateGoalProgress(goal, [], [taskZero], [], [], []);
+  assert.equal(prog.currentValue, 0);
+  assert.equal(prog.percentage, 0);
+  assert.equal(prog.remaining, 10);
+  assert.equal(prog.isCompleted, false);
+});
+
+test('TEST 12: Moving task from Goal A to Goal B updates progress on both goals correctly', () => {
+  const goalA: Goal = {
+    id: 'goal-a',
+    title: 'Goal A',
+    category: 'Study',
+    horizon: 'weekly',
+    startDate: '2026-10-01',
+    targetDate: '2026-10-31',
+    priority: 'high',
+    goalType: 'duration',
+    targetValue: 10,
+    currentValue: 0,
+    unit: 'hours',
+    progressMethod: 'automatic_time',
+    linkedCategories: [],
+    linkedHabitIds: [],
+    linkedTaskIds: ['shared-task'],
+    status: 'in_progress',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const goalB: Goal = {
+    id: 'goal-b',
+    title: 'Goal B',
+    category: 'Study',
+    horizon: 'weekly',
+    startDate: '2026-10-01',
+    targetDate: '2026-10-31',
+    priority: 'high',
+    goalType: 'duration',
+    targetValue: 10,
+    currentValue: 0,
+    unit: 'hours',
+    progressMethod: 'automatic_time',
+    linkedCategories: [],
+    linkedHabitIds: [],
+    linkedTaskIds: [],
+    status: 'in_progress',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const task: Task = {
+    id: 'shared-task',
+    title: 'Algorithmic Complexity',
+    category: 'Study',
+    priority: 'high',
+    status: 'completed',
+    estimatedDuration: 120,
+    actualDuration: 120, // 2 hours
+    linkedGoalId: 'goal-a',
+    tags: [],
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  // Initially: Goal A has 2 hours (20%), Goal B has 0 hours (0%)
+  const progA1 = calculateGoalProgress(goalA, [], [task], [], [], []);
+  const progB1 = calculateGoalProgress(goalB, [], [task], [], [], []);
+  assert.equal(progA1.currentValue, 2);
+  assert.equal(progA1.percentage, 20);
+  assert.equal(progB1.currentValue, 0);
+  assert.equal(progB1.percentage, 0);
+
+  // Move task to Goal B:
+  const movedTask: Task = { ...task, linkedGoalId: 'goal-b' };
+  const updatedGoalA: Goal = { ...goalA, linkedTaskIds: [] };
+  const updatedGoalB: Goal = { ...goalB, linkedTaskIds: ['shared-task'] };
+
+  const progA2 = calculateGoalProgress(updatedGoalA, [], [movedTask], [], [], []);
+  const progB2 = calculateGoalProgress(updatedGoalB, [], [movedTask], [], [], []);
+  assert.equal(progA2.currentValue, 0);
+  assert.equal(progA2.percentage, 0);
+  assert.equal(progB2.currentValue, 2);
+  assert.equal(progB2.percentage, 20);
+});
+
+test('TEST 13: Time session edit and delete recalculation preserves zero double counting', () => {
+  const goal: Goal = {
+    id: 'goal-time-recalc',
+    title: 'Deep Focus Sprint',
+    category: 'Work',
+    horizon: 'weekly',
+    startDate: '2026-10-25',
+    targetDate: '2026-10-31',
+    priority: 'urgent',
+    goalType: 'duration',
+    targetValue: 5,
+    currentValue: 0,
+    unit: 'hours',
+    progressMethod: 'automatic_time',
+    linkedCategories: ['Work'],
+    linkedHabitIds: [],
+    linkedTaskIds: ['task-sprint'],
+    status: 'in_progress',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  // Session has both linkedTaskId AND linkedGoalId
+  const session1: TimeSession = {
+    id: 'sess-1',
+    title: 'Sprint Block 1',
+    startTime: '2026-10-28T10:00:00Z',
+    endTime: '2026-10-28T11:00:00Z',
+    durationMinutes: 60,
+    category: 'Work',
+    linkedTaskId: 'task-sprint',
+    linkedGoalId: 'goal-time-recalc',
+    isManual: false,
+    createdAt: '',
+  };
+
+  const taskSprint: Task = {
+    id: 'task-sprint',
+    title: 'Build Core Engine',
+    category: 'Work',
+    priority: 'urgent',
+    status: 'in_progress',
+    estimatedDuration: 60,
+    actualDuration: 60,
+    linkedGoalId: 'goal-time-recalc',
+    tags: [],
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  // 1 session of 60m: 1 hour / 5 hours = 20%
+  // Must NOT double count session + task actual duration
+  const progInitial = calculateGoalProgress(goal, [session1], [taskSprint], [], [], []);
+  assert.equal(progInitial.currentValue, 1.0);
+  assert.equal(progInitial.percentage, 20);
+
+  // Edit session duration from 60m to 120m (2 hours)
+  const editedSession: TimeSession = { ...session1, durationMinutes: 120 };
+  const editedTask: Task = { ...taskSprint, actualDuration: 120 };
+  const progEdited = calculateGoalProgress(goal, [editedSession], [editedTask], [], [], []);
+  assert.equal(progEdited.currentValue, 2.0);
+  assert.equal(progEdited.percentage, 40);
+
+  // Delete session: 0 hours
+  const deletedTask: Task = { ...taskSprint, actualDuration: 0 };
+  const progDeleted = calculateGoalProgress(goal, [], [deletedTask], [], [], []);
+  assert.equal(progDeleted.currentValue, 0);
+  assert.equal(progDeleted.percentage, 0);
+});
+
+test('TEST 14: Task search and category filtering filters eligible tasks dynamically without 3-record limit', () => {
+  const allTasks: Task[] = [
+    { id: 't1', title: 'Javascript lectures by rohit negi', category: 'Study', priority: 'high', status: 'completed', estimatedDuration: 60, actualDuration: 60, tags: [], createdAt: '', updatedAt: '' },
+    { id: 't2', title: 'DSA', category: 'Study', priority: 'high', status: 'in_progress', estimatedDuration: 45, actualDuration: 30, tags: [], createdAt: '', updatedAt: '' },
+    { id: 't3', title: 'TCH WEBSITE', category: 'Work', priority: 'medium', status: 'in_progress', estimatedDuration: 120, actualDuration: 90, tags: [], createdAt: '', updatedAt: '' },
+    { id: 't4', title: 'System Architecture Design', category: 'Work', priority: 'urgent', status: 'not_started', estimatedDuration: 90, actualDuration: 0, tags: [], createdAt: '', updatedAt: '' },
+    { id: 't5', title: 'Database Optimization', category: 'Tech', priority: 'medium', status: 'completed', estimatedDuration: 60, actualDuration: 60, tags: [], createdAt: '', updatedAt: '' },
+    { id: 't6', title: 'Cancelled Project Task', category: 'Work', priority: 'low', status: 'cancelled', estimatedDuration: 30, actualDuration: 0, tags: [], createdAt: '', updatedAt: '' },
+  ];
+
+  // Exclude cancelled tasks
+  const eligible = allTasks.filter((t) => t.status !== 'cancelled');
+  assert.equal(eligible.length, 5); // All 5 eligible tasks displayed, not limited to 3!
+
+  // Search by title "javascript"
+  const searchResults = eligible.filter((t) => t.title.toLowerCase().includes('javascript'));
+  assert.equal(searchResults.length, 1);
+  assert.equal(searchResults[0].id, 't1');
+
+  // Filter by category "Work"
+  const workResults = eligible.filter((t) => t.category === 'Work');
+  assert.equal(workResults.length, 2);
+  assert.deepEqual(workResults.map((t) => t.id), ['t3', 't4']);
+});
+
+test('TEST 15: Rule A - Completed task without timer contributes planned duration (2 hours)', () => {
+  const block: ScheduleBlock = {
+    id: 'b-rule-a',
+    title: 'Deep Architecture Work',
+    date: '2026-10-30',
+    startTime: '10:00',
+    endTime: '12:00',
+    plannedDuration: 120, // 2 hours
+    actualDuration: 0,
+    status: 'completed',
+    category: 'Engineering',
+    priority: 'high',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const metrics = calculateCreditedWorkingTime('2026-10-30', [block], []);
+  assert.equal(metrics.totalTrackedMinutes, 120); // exactly 2 hours credited
+  assert.equal(metrics.totalPlannedMinutes, 120);
+  assert.equal(metrics.completedPlannedMinutes, 120);
+  assert.equal(metrics.remainingScheduledMinutes, 0);
+  assert.equal(metrics.varianceMinutes, 0);
+  assert.equal(metrics.blockBreakdown[0].source, 'planned_completion');
+});
+
+test('TEST 16: Rule B - Completed task with timer uses recorded actual duration (1h 30m) instead of planned (2h)', () => {
+  const block: ScheduleBlock = {
+    id: 'b-rule-b',
+    title: 'Database Indexing',
+    date: '2026-10-30',
+    startTime: '10:00',
+    endTime: '12:00',
+    plannedDuration: 120, // 2 hours planned
+    actualDuration: 90,
+    status: 'completed',
+    category: 'Engineering',
+    priority: 'high',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const session: TimeSession = {
+    id: 'sess-b',
+    title: 'Database Indexing',
+    category: 'Engineering',
+    startTime: '2026-10-30T10:00:00.000Z',
+    durationMinutes: 90, // 1 hour 30 minutes recorded
+    isManual: false,
+    linkedScheduleBlockId: 'b-rule-b',
+    createdAt: '',
+  };
+
+  const metrics = calculateCreditedWorkingTime('2026-10-30', [block], [session]);
+  assert.equal(metrics.totalTrackedMinutes, 90); // 1.5 hours credited, NOT 120m and NOT 120+90m (no double counting!)
+  assert.equal(metrics.totalPlannedMinutes, 120);
+  assert.equal(metrics.varianceMinutes, -30); // 90 - 120 = -30m variance
+  assert.equal(metrics.blockBreakdown[0].source, 'timer');
+});
+
+test('TEST 17: Rule C - Incomplete task without timer contributes 0 working time', () => {
+  const block: ScheduleBlock = {
+    id: 'b-rule-c',
+    title: 'Future Feature Implementation',
+    date: '2026-10-30',
+    startTime: '14:00',
+    endTime: '16:00',
+    plannedDuration: 120, // 2 hours planned
+    actualDuration: 0,
+    status: 'scheduled', // Incomplete
+    category: 'Engineering',
+    priority: 'medium',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const metrics = calculateCreditedWorkingTime('2026-10-30', [block], []);
+  assert.equal(metrics.totalTrackedMinutes, 0); // 0 credited
+  assert.equal(metrics.totalPlannedMinutes, 120);
+  assert.equal(metrics.remainingScheduledMinutes, 120);
+  assert.equal(metrics.varianceMinutes, -120);
+  assert.equal(metrics.blockBreakdown[0].source, 'none');
+});
+
+test('TEST 18: Rule D - Incomplete task with timer contributes actual timer duration (45 minutes)', () => {
+  const block: ScheduleBlock = {
+    id: 'b-rule-d',
+    title: 'Refactoring API Client',
+    date: '2026-10-30',
+    startTime: '14:00',
+    endTime: '16:00',
+    plannedDuration: 120, // 2 hours planned
+    actualDuration: 45,
+    status: 'in_progress', // Incomplete
+    category: 'Engineering',
+    priority: 'medium',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const session: TimeSession = {
+    id: 'sess-d',
+    title: 'Refactoring API Client',
+    category: 'Engineering',
+    startTime: '2026-10-30T14:00:00.000Z',
+    durationMinutes: 45, // 45 minutes worked
+    isManual: false,
+    linkedScheduleBlockId: 'b-rule-d',
+    createdAt: '',
+  };
+
+  const metrics = calculateCreditedWorkingTime('2026-10-30', [block], [session]);
+  assert.equal(metrics.totalTrackedMinutes, 45); // 45m credited
+  assert.equal(metrics.totalPlannedMinutes, 120);
+  assert.equal(metrics.remainingScheduledMinutes, 120);
+  assert.equal(metrics.varianceMinutes, -75); // 45 - 120 = -75
+  assert.equal(metrics.blockBreakdown[0].source, 'timer');
+});
+
+test('TEST 19: Rule E & Unified Schedule Example from User Prompt', () => {
+  // Morning Study: 1 hour, Completed -> 60m
+  // JavaScript Practice: 2 hours, Completed -> 120m
+  // DSA: 1 hour, Completed -> 60m
+  // Project Development: 2 hours, Incomplete -> 0m
+  // Expected:
+  // Tracked Working Time: 4 hours (240 min)
+  // Planned Working Time: 6 hours (360 min)
+  // Remaining/Incompleted Scheduled Time: 2 hours (120 min)
+  const blocks: ScheduleBlock[] = [
+    {
+      id: 'b1',
+      title: 'Morning Study',
+      date: '2026-10-30',
+      startTime: '08:00',
+      endTime: '09:00',
+      plannedDuration: 60,
+      actualDuration: 0,
+      status: 'completed',
+      category: 'Study',
+      priority: 'medium',
+      createdAt: '',
+      updatedAt: '',
+    },
+    {
+      id: 'b2',
+      title: 'JavaScript Practice',
+      date: '2026-10-30',
+      startTime: '09:30',
+      endTime: '11:30',
+      plannedDuration: 120,
+      actualDuration: 0,
+      status: 'completed',
+      category: 'Study',
+      priority: 'high',
+      createdAt: '',
+      updatedAt: '',
+    },
+    {
+      id: 'b3',
+      title: 'DSA',
+      date: '2026-10-30',
+      startTime: '13:00',
+      endTime: '14:00',
+      plannedDuration: 60,
+      actualDuration: 0,
+      status: 'completed',
+      category: 'Study',
+      priority: 'high',
+      createdAt: '',
+      updatedAt: '',
+    },
+    {
+      id: 'b4',
+      title: 'Project Development',
+      date: '2026-10-30',
+      startTime: '15:00',
+      endTime: '17:00',
+      plannedDuration: 120,
+      actualDuration: 0,
+      status: 'scheduled', // Incomplete
+      category: 'Work',
+      priority: 'urgent',
+      createdAt: '',
+      updatedAt: '',
+    },
+  ];
+
+  const metrics = calculateCreditedWorkingTime('2026-10-30', blocks, []);
+  assert.equal(metrics.totalTrackedMinutes, 240); // 4 hours
+  assert.equal(metrics.totalPlannedMinutes, 360); // 6 hours
+  assert.equal(metrics.completedPlannedMinutes, 240); // 4 hours
+  assert.equal(metrics.remainingScheduledMinutes, 120); // 2 hours
+  assert.equal(metrics.varianceMinutes, -120); // -2 hours
+
+  // Now add an independent standalone time session (e.g. 30m reading)
+  const standaloneSession: TimeSession = {
+    id: 'sess-standalone',
+    title: 'Ad-hoc Documentation Reading',
+    category: 'Reading',
+    startTime: '2026-10-30T19:00:00.000Z',
+    durationMinutes: 30,
+    isManual: true,
+    createdAt: '',
+  };
+
+  const metricsWithStandalone = calculateCreditedWorkingTime('2026-10-30', blocks, [standaloneSession]);
+  assert.equal(metricsWithStandalone.totalTrackedMinutes, 270); // 4.5 hours (240 + 30)
+  assert.equal(metricsWithStandalone.standaloneSessionMinutes, 30);
+  assert.equal(metricsWithStandalone.totalPlannedMinutes, 360);
+});
+
+test('TEST 20: Undo / Reset behavior: unchecking a completed task immediately removes credited time', () => {
+  const block: ScheduleBlock = {
+    id: 'b-undo',
+    title: 'UI Testing',
+    date: '2026-10-30',
+    startTime: '11:00',
+    endTime: '13:00',
+    plannedDuration: 120,
+    actualDuration: 0,
+    status: 'completed',
+    category: 'QA',
+    priority: 'medium',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  // Initially completed
+  const initial = calculateCreditedWorkingTime('2026-10-30', [block], []);
+  assert.equal(initial.totalTrackedMinutes, 120);
+
+  // User resets / unchecks the task back to scheduled
+  const uncompletedBlock: ScheduleBlock = {
+    ...block,
+    status: 'scheduled',
+    actualDuration: 0,
+  };
+
+  const afterReset = calculateCreditedWorkingTime('2026-10-30', [uncompletedBlock], []);
+  assert.equal(afterReset.totalTrackedMinutes, 0); // Immediately removes 120m
+  assert.equal(afterReset.remainingScheduledMinutes, 120);
+});
+
+test('TEST 21: Goal progress derives credited time from completed schedule block without timer', () => {
+  // Goal: "COMPLETE JAVASCRIPT SERIES'S", 15h target, automatic_time
+  const goal: Goal = {
+    id: 'goal-js-series',
+    title: "COMPLETE JAVASCRIPT SERIES'S",
+    category: 'Study',
+    goalType: 'duration',
+    targetValue: 15, // 15 hours
+    currentValue: 0,
+    unit: 'hours',
+    progressMethod: 'automatic_time',
+    status: 'in_progress',
+    horizon: 'weekly',
+    priority: 'high',
+    linkedTaskIds: ['task-js-series'],
+    linkedCategories: [],
+    linkedHabitIds: [],
+    startDate: '2026-10-01',
+    targetDate: '2026-12-31',
+    createdAt: '2026-10-01',
+    updatedAt: '2026-10-01',
+  };
+
+  const task: Task = {
+    id: 'task-js-series',
+    title: "COMPLETE JAVASCRIPT SERIES'S",
+    category: 'Study',
+    priority: 'high',
+    status: 'completed',
+    estimatedDuration: 90,
+    actualDuration: 0,
+    linkedGoalId: 'goal-js-series',
+    tags: [],
+    createdAt: '2026-10-01',
+    updatedAt: '2026-10-01',
+  };
+
+  // Completed block for 1h 30m (90 min) without timer
+  const block: ScheduleBlock = {
+    id: 'block-js-series',
+    title: "COMPLETE JAVASCRIPT SERIES'S",
+    date: '2026-10-30',
+    startTime: '09:00',
+    endTime: '10:30',
+    plannedDuration: 90, // 1.5 hours
+    actualDuration: 0,
+    status: 'completed',
+    linkedTaskId: 'task-js-series',
+    category: 'Study',
+    priority: 'high',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const progress = calculateGoalProgress(goal, [], [task], [], [], [block]);
+  // 90 minutes = 1.5 hours. 1.5h / 15h = 10%, 13.5h remaining
+  assert.equal(progress.currentValue, 1.5);
+  assert.equal(progress.percentage, 10);
+  assert.equal(progress.remaining, 13.5);
+
+  // If block is reset to scheduled:
+  const blockReset: ScheduleBlock = { ...block, status: 'scheduled', actualDuration: 0 };
+  const taskReset: Task = { ...task, status: 'not_started', actualDuration: 0, estimatedDuration: 0 };
+  const progressReset = calculateGoalProgress(goal, [], [taskReset], [], [], [blockReset]);
+  assert.equal(progressReset.currentValue, 0);
+  assert.equal(progressReset.percentage, 0);
+  assert.equal(progressReset.remaining, 15);
+});
+
+
 

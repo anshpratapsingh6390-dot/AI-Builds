@@ -11,10 +11,13 @@ import {
   Check,
   CheckCircle2,
   FileText,
+  Search,
+  Plus,
+  Sparkles,
 } from 'lucide-react';
 import { useLifeOS } from '../context/LifeOSContext';
 import { Goal, GoalHorizon, GoalProgressMethod, GoalType, Priority } from '../types';
-import { getTodayDateString } from '../utils/dateUtils';
+import { formatDuration, getTodayDateString } from '../utils/dateUtils';
 
 interface GoalModalProps {
   isOpen: boolean;
@@ -23,11 +26,11 @@ interface GoalModalProps {
 }
 
 export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, goalToEdit, onClose }) => {
-  const { categories, tasks, habits, addGoal, updateGoal } = useLifeOS();
+  const { categories, tasks, habits, addGoal, updateGoal, addTask } = useLifeOS();
 
   const isEdit = Boolean(goalToEdit);
 
-  // Form State (14 fields)
+  // Form State
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState(categories[0]?.name || 'Work');
@@ -42,6 +45,16 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, goalToEdit, onClos
   const [linkedHabitIds, setLinkedHabitIds] = useState<string[]>([]);
   const [priority, setPriority] = useState<Priority>('high');
   const [notes, setNotes] = useState('');
+
+  // Task Search, Category Filtering, and Inline Creation
+  const [taskSearchQuery, setTaskSearchQuery] = useState('');
+  const [taskCategoryFilter, setTaskCategoryFilter] = useState('all');
+  const [isCreatingTask, setIsCreatingTask] = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [newTaskCategory, setNewTaskCategory] = useState(categories[0]?.name || 'Work');
+  const [newTaskPriority, setNewTaskPriority] = useState<Priority>('high');
+  const [newTaskEstimate, setNewTaskEstimate] = useState(30);
+  const [newTaskError, setNewTaskError] = useState<string | null>(null);
 
   // Validation errors
   const [error, setError] = useState<string | null>(null);
@@ -85,6 +98,10 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, goalToEdit, onClos
       setNotes('');
       setError(null);
     }
+    setTaskSearchQuery('');
+    setTaskCategoryFilter('all');
+    setIsCreatingTask(false);
+    setNewTaskError(null);
   }, [goalToEdit, isOpen, categories]);
 
   // Adjust default unit and goalType when progressMethod changes
@@ -118,6 +135,33 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, goalToEdit, onClos
     setLinkedHabitIds((prev) =>
       prev.includes(habitId) ? prev.filter((id) => id !== habitId) : [...prev, habitId]
     );
+  };
+
+  const handleCreateAndLinkTask = async () => {
+    const clean = newTaskTitle.trim();
+    if (!clean) {
+      setNewTaskError('Task title is required.');
+      return;
+    }
+    setNewTaskError(null);
+    try {
+      const newId = await addTask({
+        title: clean,
+        category: newTaskCategory || category,
+        priority: newTaskPriority,
+        estimatedDuration: Number(newTaskEstimate) || 30,
+        actualDuration: 0,
+        status: 'not_started',
+        tags: [],
+      });
+      // Automatically link the newly created task to this goal
+      setLinkedTaskIds((prev) => (prev.includes(newId) ? prev : [...prev, newId]));
+      setNewTaskTitle('');
+      setNewTaskEstimate(30);
+      setIsCreatingTask(false);
+    } catch (err) {
+      setNewTaskError('Failed to create task in database.');
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -175,6 +219,45 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, goalToEdit, onClos
 
     onClose();
   };
+
+  // Live progress summary calculations for linked tasks
+  const selectedTasks = tasks.filter((t) => linkedTaskIds.includes(t.id));
+  const totalLinkedActualMinutes = selectedTasks.reduce((sum, t) => sum + (t.actualDuration || 0), 0);
+  const numTargetVal = Number(targetValue) || 1;
+  const isHoursUnit =
+    (unit || '').toLowerCase().includes('hour') ||
+    (unit || '').toLowerCase() === 'h' ||
+    (unit || '').toLowerCase() === 'hrs';
+
+  let liveProgressDisplay = '';
+  if (progressMethod === 'automatic_time') {
+    const currentVal = isHoursUnit
+      ? Math.round((totalLinkedActualMinutes / 60) * 100) / 100
+      : totalLinkedActualMinutes;
+    const pct = Math.min(100, Math.max(0, Math.round((currentVal / numTargetVal) * 10000) / 100));
+    liveProgressDisplay = `${currentVal} / ${numTargetVal} ${unit} (${pct}%)`;
+  } else if (progressMethod === 'automatic_tasks') {
+    const completedCount = selectedTasks.filter((t) => t.status === 'completed').length;
+    const pct = Math.min(100, Math.max(0, Math.round((completedCount / numTargetVal) * 10000) / 100));
+    liveProgressDisplay = `${completedCount} / ${numTargetVal} tasks (${pct}%)`;
+  } else {
+    liveProgressDisplay = `${selectedTasks.length} linked`;
+  }
+
+  // Filter tasks dynamically (exclude cancelled, filter by title search and category)
+  const eligibleTasks = tasks.filter((t) => {
+    if (t.status === 'cancelled') return false;
+    if (taskSearchQuery.trim()) {
+      const q = taskSearchQuery.toLowerCase().trim();
+      const matchTitle = t.title.toLowerCase().includes(q);
+      const matchCategory = t.category.toLowerCase().includes(q);
+      if (!matchTitle && !matchCategory) return false;
+    }
+    if (taskCategoryFilter !== 'all' && t.category !== taskCategoryFilter) {
+      return false;
+    }
+    return true;
+  });
 
   if (!isOpen) return null;
 
@@ -387,25 +470,226 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, goalToEdit, onClos
             </div>
           </div>
 
-          {/* 11. Explicit Linked Tasks */}
-          <div className="space-y-2 pt-2 border-t border-neutral-800">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold text-neutral-300 flex items-center gap-1.5">
-                <ListTodo className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Explicitly Linked Tasks ({linkedTaskIds.length} selected)</span>
-              </label>
-              <span className="text-[10px] text-neutral-500">
-                Work on linked tasks directly fuels this goal
-              </span>
+          {/* 11. Explicit Linked Tasks (Upgraded Section with Search, Category Filter, Inline Creation & Live Progress) */}
+          <div className="space-y-3 pt-3 border-t border-neutral-800">
+            {/* Header with Title & Inline Add Action */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <label className="text-xs font-semibold text-neutral-200 flex items-center gap-1.5">
+                  <ListTodo className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Explicitly Linked Tasks ({linkedTaskIds.length} linked)</span>
+                </label>
+                <span className="text-[11px] text-neutral-400">
+                  Tracked actual time and completion from linked tasks automatically fuel this goal
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsCreatingTask(!isCreatingTask);
+                  setNewTaskError(null);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 text-xs font-semibold border border-indigo-500/30 transition-colors self-start sm:self-auto"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>{isCreatingTask ? 'Close Task Form' : 'Add New Task'}</span>
+              </button>
             </div>
 
-            {tasks.length === 0 ? (
-              <p className="text-xs text-neutral-500 italic p-3 rounded-xl bg-neutral-950 border border-neutral-850">
-                No tasks available to link yet. You can create tasks later and link them here or from the task editor.
-              </p>
+            {/* Inline "Add New Task" Drawer / Form (Option B) */}
+            {isCreatingTask && (
+              <div className="p-4 rounded-2xl bg-neutral-950 border border-indigo-500/30 shadow-lg space-y-3 animate-in fade-in duration-150">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-neutral-200 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Create & Auto-Link Task</span>
+                  </span>
+                  <span className="text-[10px] text-neutral-400">
+                    Saves to Tasks module & links instantly
+                  </span>
+                </div>
+
+                {newTaskError && (
+                  <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-[11px] text-rose-400 flex items-center gap-1.5">
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    <span>{newTaskError}</span>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <input
+                    type="text"
+                    value={newTaskTitle}
+                    onChange={(e) => setNewTaskTitle(e.target.value)}
+                    placeholder="Task title (e.g. JavaScript practice exercises)..."
+                    className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 text-neutral-100 text-xs placeholder:text-neutral-500 outline-none focus:border-indigo-500"
+                  />
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div>
+                      <label className="block text-[10px] text-neutral-400 mb-1">Category</label>
+                      <select
+                        value={newTaskCategory}
+                        onChange={(e) => setNewTaskCategory(e.target.value)}
+                        className="w-full px-2.5 py-1.5 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-200 text-xs outline-none"
+                      >
+                        {categories.map((c) => (
+                          <option key={c.id} value={c.name}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] text-neutral-400 mb-1">Priority</label>
+                      <select
+                        value={newTaskPriority}
+                        onChange={(e) => setNewTaskPriority(e.target.value as Priority)}
+                        className="w-full px-2.5 py-1.5 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-200 text-xs outline-none"
+                      >
+                        <option value="urgent">Urgent</option>
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                        <option value="low">Low</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] text-neutral-400 mb-1">Est. Duration (min)</label>
+                      <input
+                        type="number"
+                        min="5"
+                        value={newTaskEstimate}
+                        onChange={(e) => setNewTaskEstimate(Number(e.target.value))}
+                        className="w-full px-2.5 py-1.5 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-200 text-xs outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCreatingTask(false);
+                      setNewTaskError(null);
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-400 text-xs font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCreateAndLinkTask}
+                    className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-xs flex items-center gap-1.5"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Create & Link Task</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Top Summary Status Bar */}
+            <div className="p-3 rounded-2xl bg-neutral-950/90 border border-neutral-800/80 grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-indigo-600/15 text-indigo-400 flex items-center justify-center shrink-0">
+                  <ListTodo className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase font-bold tracking-wider text-neutral-500">
+                    Linked Tasks
+                  </div>
+                  <div className="font-semibold text-neutral-200">
+                    {linkedTaskIds.length} {linkedTaskIds.length === 1 ? 'task' : 'tasks'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-sky-600/15 text-sky-400 flex items-center justify-center shrink-0">
+                  <Clock className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase font-bold tracking-wider text-neutral-500">
+                    Combined Actual Work
+                  </div>
+                  <div className="font-semibold text-sky-400 font-mono">
+                    {formatDuration(totalLinkedActualMinutes)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-emerald-600/15 text-emerald-400 flex items-center justify-center shrink-0">
+                  <Target className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase font-bold tracking-wider text-neutral-500">
+                    Live Progress
+                  </div>
+                  <div className="font-semibold text-emerald-400">
+                    {liveProgressDisplay}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Search and Category Filter Controls (Option A) */}
+            <div className="flex flex-col sm:flex-row items-center gap-2">
+              <div className="relative flex-1 w-full">
+                <Search className="w-3.5 h-3.5 text-neutral-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={taskSearchQuery}
+                  onChange={(e) => setTaskSearchQuery(e.target.value)}
+                  placeholder="Search existing tasks by title..."
+                  className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-neutral-950 border border-neutral-800 text-neutral-200 placeholder:text-neutral-500 text-xs outline-none focus:border-indigo-500"
+                />
+                {taskSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setTaskSearchQuery('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300 text-xs"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+
+              <div className="w-full sm:w-44 shrink-0">
+                <select
+                  value={taskCategoryFilter}
+                  onChange={(e) => setTaskCategoryFilter(e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-xl bg-neutral-950 border border-neutral-800 text-neutral-300 text-xs outline-none focus:border-indigo-500"
+                >
+                  <option value="all">All Categories</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Scrollable Tasks List with All Eligible Tasks */}
+            {eligibleTasks.length === 0 ? (
+              <div className="p-4 rounded-xl bg-neutral-950 border border-neutral-850 text-center space-y-1">
+                <p className="text-xs text-neutral-400">
+                  {tasks.length === 0
+                    ? 'No tasks created yet in WOLI OS.'
+                    : 'No tasks match the search or category filter.'}
+                </p>
+                <p className="text-[11px] text-neutral-500">
+                  Click "+ Add New Task" above to create and link a new task immediately.
+                </p>
+              </div>
             ) : (
-              <div className="max-h-40 overflow-y-auto space-y-1.5 p-2 rounded-xl bg-neutral-950 border border-neutral-800">
-                {tasks.map((task) => {
+              <div className="max-h-56 overflow-y-auto space-y-1.5 p-2 rounded-xl bg-neutral-950 border border-neutral-800">
+                {eligibleTasks.map((task) => {
                   const isChecked = linkedTaskIds.includes(task.id);
                   return (
                     <label
@@ -421,17 +705,28 @@ export const GoalModal: React.FC<GoalModalProps> = ({ isOpen, goalToEdit, onClos
                           type="checkbox"
                           checked={isChecked}
                           onChange={() => toggleLinkedTask(task.id)}
-                          className="rounded border-neutral-700 text-indigo-600 focus:ring-0"
+                          className="rounded border-neutral-700 text-indigo-600 focus:ring-0 cursor-pointer"
                         />
                         <span className="font-medium truncate">{task.title}</span>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 shrink-0">
                           {task.category}
                         </span>
+                        {task.priority === 'urgent' && (
+                          <span className="text-[9px] px-1 py-0.2 rounded bg-rose-500/20 text-rose-300 font-semibold uppercase">
+                            Urgent
+                          </span>
+                        )}
                       </div>
-                      <div className="flex items-center gap-2 shrink-0 text-[11px] text-neutral-400">
-                        <span>{task.actualDuration || 0}m actual</span>
+
+                      <div className="flex items-center gap-2.5 shrink-0 text-[11px] text-neutral-400">
+                        <span className="font-mono text-neutral-300">
+                          {task.actualDuration || 0}m actual
+                        </span>
                         {task.status === 'completed' && (
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                          <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-medium">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Done</span>
+                          </span>
                         )}
                       </div>
                     </label>

@@ -14,6 +14,8 @@ import {
   Calendar,
   AlertCircle,
   FileText,
+  Edit2,
+  Trash2,
 } from 'lucide-react';
 import { useLifeOS } from '../context/LifeOSContext';
 import { TimeSession } from '../types';
@@ -37,6 +39,8 @@ export const TimeTrackerView: React.FC = () => {
     stopAndSaveTimer,
     discardTimer,
     recordManualTime,
+    updateTimeSession,
+    deleteTimeSession,
   } = useLifeOS();
 
   // Active timer configuration state (when starting a new session)
@@ -58,6 +62,15 @@ export const TimeTrackerView: React.FC = () => {
   const [manualHabitId, setManualHabitId] = useState('');
   const [manualGoalId, setManualGoalId] = useState('');
   const [manualNotes, setManualNotes] = useState('');
+
+  // Edit session state
+  const [editingSession, setEditingSession] = useState<TimeSession | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editMinutes, setEditMinutes] = useState(30);
+  const [editCategory, setEditCategory] = useState('Work');
+  const [editTaskId, setEditTaskId] = useState('');
+  const [editGoalId, setEditGoalId] = useState('');
+  const [editNotes, setEditNotes] = useState('');
 
   // Format timer seconds into HH:MM:SS
   const formatTimerDigits = (totalSec: number) => {
@@ -400,33 +413,75 @@ export const TimeTrackerView: React.FC = () => {
                 No time logs recorded for this day. Start the clock or log a manual session.
               </p>
             ) : (
-              daySessions.map((session) => (
-                <div
-                  key={session.id}
-                  className="p-3.5 rounded-xl bg-neutral-950/70 border border-neutral-850 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-                >
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-neutral-100">{session.title}</span>
-                      <span className="text-[10px] px-2 py-0.5 rounded-md bg-neutral-800 text-neutral-300">
-                        {session.category}
-                      </span>
-                      {session.isManual && (
-                        <span className="text-[10px] text-neutral-500 italic">(Manual)</span>
+              daySessions.map((session) => {
+                const linkedTask = session.linkedTaskId ? tasks.find((t) => t.id === session.linkedTaskId) : null;
+                const linkedGoal = session.linkedGoalId ? goals.find((g) => g.id === session.linkedGoalId) : null;
+                return (
+                  <div
+                    key={session.id}
+                    className="p-3.5 rounded-xl bg-neutral-950/70 border border-neutral-850 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                  >
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-bold text-neutral-100">{session.title}</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-md bg-neutral-800 text-neutral-300">
+                          {session.category}
+                        </span>
+                        {session.isManual && (
+                          <span className="text-[10px] text-neutral-500 italic">(Manual)</span>
+                        )}
+                        {linkedTask && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-md bg-indigo-500/15 text-indigo-300 border border-indigo-500/20 flex items-center gap-1">
+                            <CheckSquare className="w-3 h-3" />
+                            <span>{linkedTask.title}</span>
+                          </span>
+                        )}
+                        {linkedGoal && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-300 border border-emerald-500/20 flex items-center gap-1">
+                            <Target className="w-3 h-3" />
+                            <span>{linkedGoal.title}</span>
+                          </span>
+                        )}
+                      </div>
+                      {session.notes && (
+                        <p className="text-neutral-400 mt-1 italic">"{session.notes}"</p>
                       )}
                     </div>
-                    {session.notes && (
-                      <p className="text-neutral-400 mt-1 italic">"{session.notes}"</p>
-                    )}
-                  </div>
 
-                  <div className="flex items-center gap-4 text-xs font-mono text-neutral-400 self-end sm:self-center">
-                    <span className="font-bold text-sky-400 font-sans text-sm">
-                      {formatDuration(session.durationMinutes)}
-                    </span>
+                    <div className="flex items-center gap-3 text-xs font-mono text-neutral-400 self-end sm:self-center">
+                      <span className="font-bold text-sky-400 font-sans text-sm">
+                        {formatDuration(session.durationMinutes)}
+                      </span>
+                      <div className="flex items-center gap-1 border-l border-neutral-800 pl-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingSession(session);
+                            setEditTitle(session.title);
+                            setEditMinutes(session.durationMinutes);
+                            setEditCategory(session.category);
+                            setEditTaskId(session.linkedTaskId || '');
+                            setEditGoalId(session.linkedGoalId || '');
+                            setEditNotes(session.notes || '');
+                          }}
+                          className="p-1.5 rounded-lg text-neutral-400 hover:text-indigo-400 hover:bg-neutral-850 transition-colors"
+                          title="Edit session"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteTimeSession(session.id)}
+                          className="p-1.5 rounded-lg text-neutral-400 hover:text-rose-400 hover:bg-neutral-850 transition-colors"
+                          title="Delete session"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
@@ -526,6 +581,40 @@ export const TimeTrackerView: React.FC = () => {
                 </div>
               </div>
 
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-300 mb-1">Link Task (Optional)</label>
+                  <select
+                    value={manualTaskId}
+                    onChange={(e) => setManualTaskId(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800 text-neutral-100 text-xs"
+                  >
+                    <option value="">None (Independent session)</option>
+                    {tasks.filter((t) => t.status !== 'cancelled').map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.title} ({t.category})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-300 mb-1">Link Goal (Optional)</label>
+                  <select
+                    value={manualGoalId}
+                    onChange={(e) => setManualGoalId(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800 text-neutral-100 text-xs"
+                  >
+                    <option value="">None (Independent session)</option>
+                    {goals.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.title} ({g.horizon})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-neutral-300 mb-1">Session Notes</label>
                 <input
@@ -550,6 +639,131 @@ export const TimeTrackerView: React.FC = () => {
                   className="px-5 py-2 text-xs font-semibold rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white"
                 >
                   Record Session
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Session Modal */}
+      {editingSession && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs">
+          <div className="w-full max-w-lg bg-neutral-900 border border-neutral-800 rounded-2xl p-6 shadow-2xl space-y-4">
+            <h3 className="text-base font-bold text-neutral-100">Edit Time Session</h3>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!editTitle.trim()) return;
+                await updateTimeSession(editingSession.id, {
+                  title: editTitle.trim(),
+                  durationMinutes: Number(editMinutes) || 1,
+                  category: editCategory,
+                  linkedTaskId: editTaskId || undefined,
+                  linkedGoalId: editGoalId || undefined,
+                  notes: editNotes.trim(),
+                });
+                setEditingSession(null);
+              }}
+              className="space-y-4"
+            >
+              <div>
+                <label className="block text-xs font-semibold text-neutral-300 mb-1">Session Title *</label>
+                <input
+                  type="text"
+                  required
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  className="w-full px-3.5 py-2 rounded-xl bg-neutral-950 border border-neutral-800 text-neutral-100 text-xs"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-300 mb-1">Duration (Min)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={editMinutes}
+                    onChange={(e) => setEditMinutes(Number(e.target.value))}
+                    className="w-full px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800 text-neutral-100 text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-300 mb-1">Category</label>
+                  <select
+                    value={editCategory}
+                    onChange={(e) => setEditCategory(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800 text-neutral-100 text-xs"
+                  >
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.name}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-300 mb-1">Link Task (Optional)</label>
+                  <select
+                    value={editTaskId}
+                    onChange={(e) => setEditTaskId(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800 text-neutral-100 text-xs"
+                  >
+                    <option value="">None (Independent session)</option>
+                    {tasks.filter((t) => t.status !== 'cancelled').map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.title} ({t.category})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-300 mb-1">Link Goal (Optional)</label>
+                  <select
+                    value={editGoalId}
+                    onChange={(e) => setEditGoalId(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800 text-neutral-100 text-xs"
+                  >
+                    <option value="">None (Independent session)</option>
+                    {goals.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.title} ({g.horizon})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-neutral-300 mb-1">Notes</label>
+                <input
+                  type="text"
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                  className="w-full px-3.5 py-2 rounded-xl bg-neutral-950 border border-neutral-800 text-neutral-100 text-xs"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingSession(null)}
+                  className="px-4 py-2 text-xs font-medium rounded-xl border border-neutral-700 bg-neutral-800 text-neutral-300 hover:bg-neutral-750"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 text-xs font-semibold rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white"
+                >
+                  Save Changes
                 </button>
               </div>
             </form>

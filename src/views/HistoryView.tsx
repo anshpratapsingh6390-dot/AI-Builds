@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   BookOpen,
   Calendar,
@@ -24,7 +24,11 @@ import {
   getYearRange,
   parseDate,
 } from '../utils/dateUtils';
-import { calculateHabitCompletionRate, calculateTaskCompletionRate } from '../utils/rules';
+import {
+  calculateHabitCompletionRate,
+  calculateTaskCompletionRate,
+  calculateCreditedWorkingTime,
+} from '../utils/rules';
 
 export const HistoryView: React.FC = () => {
   const {
@@ -39,6 +43,7 @@ export const HistoryView: React.FC = () => {
     tasks,
     habits,
     occurrences,
+    scheduleBlocks,
     timeSessions,
     selectedDate,
     settings,
@@ -119,8 +124,10 @@ export const HistoryView: React.FC = () => {
   // Live auto-calculated summary for current review period
   const dayTasks = tasks.filter((t) => t.dueDate === dailyDate);
   const dayTaskMetrics = calculateTaskCompletionRate(dayTasks);
-  const daySessions = timeSessions.filter((s) => s.startTime.startsWith(dailyDate));
-  const dayTrackedMin = daySessions.reduce((sum, s) => sum + s.durationMinutes, 0);
+  const dayWorkingTime = useMemo(() => {
+    return calculateCreditedWorkingTime(dailyDate, scheduleBlocks, timeSessions, tasks);
+  }, [dailyDate, scheduleBlocks, timeSessions, tasks]);
+  const dayTrackedMin = dayWorkingTime.totalTrackedMinutes;
   const dayHabitsRate = calculateHabitCompletionRate(habits, occurrences, dailyDate);
 
   const handleSaveDaily = async () => {

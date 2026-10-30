@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   CalendarDays,
   Plus,
@@ -27,12 +27,14 @@ import {
   parseDate,
   timeToMinutes,
 } from '../utils/dateUtils';
+import { calculateCreditedWorkingTime, CreditedBlockTime } from '../utils/rules';
 import { ConfirmModal } from '../components/ConfirmModal';
 
 export const DailyPlannerView: React.FC = () => {
   const {
     scheduleBlocks,
     tasks,
+    timeSessions,
     categories,
     selectedDate,
     addScheduleBlock,
@@ -173,10 +175,19 @@ export const DailyPlannerView: React.FC = () => {
     }
   };
 
-  // Planned vs actual hours summary for today
-  const totalPlannedMinutes = dayBlocks.reduce((s, b) => s + (b.plannedDuration || 0), 0);
-  const totalActualMinutes = dayBlocks.reduce((s, b) => s + (b.actualDuration || 0), 0);
-  const varianceMinutes = totalActualMinutes - totalPlannedMinutes;
+  // Planned vs actual hours summary for selected date using unified calculation
+  const workingTimeMetrics = useMemo(() => {
+    return calculateCreditedWorkingTime(selectedDate, scheduleBlocks, timeSessions, tasks);
+  }, [selectedDate, scheduleBlocks, timeSessions, tasks]);
+
+  const blockTimeMap = useMemo(
+    () => new Map(workingTimeMetrics.blockBreakdown.map((b: CreditedBlockTime) => [b.blockId, b])),
+    [workingTimeMetrics]
+  );
+
+  const totalPlannedMinutes = workingTimeMetrics.totalPlannedMinutes;
+  const totalActualMinutes = workingTimeMetrics.totalTrackedMinutes;
+  const varianceMinutes = workingTimeMetrics.varianceMinutes;
 
   return (
     <div className="space-y-6 pb-12 animate-in fade-in duration-200">
@@ -364,27 +375,35 @@ export const DailyPlannerView: React.FC = () => {
                             </span>
                             <span>•</span>
                             <span>Planned: {formatDuration(block.plannedDuration)}</span>
-                            <span>•</span>
-                            <span className={block.actualDuration > 0 ? 'text-sky-400' : 'text-neutral-500'}>
-                              Actual: {formatDuration(block.actualDuration || 0)}
-                            </span>
-                            {block.actualDuration > 0 && (
-                              <>
-                                <span>•</span>
-                                <span
-                                  className={
-                                    variance > 0
-                                      ? 'text-amber-400 font-medium'
-                                      : variance < 0
-                                      ? 'text-emerald-400 font-medium'
-                                      : 'text-neutral-400'
-                                  }
-                                >
-                                  Variance: {variance >= 0 ? '+' : ''}
-                                  {formatDuration(variance)}
-                                </span>
-                              </>
-                            )}
+                            {(() => {
+                              const credited = blockTimeMap.get(block.id)?.creditedMinutes || block.actualDuration || 0;
+                              const blockVariance = credited - block.plannedDuration;
+                              return (
+                                <>
+                                  <span>•</span>
+                                  <span className={credited > 0 ? 'text-sky-400 font-medium' : 'text-neutral-500'}>
+                                    Actual: {formatDuration(credited)}
+                                  </span>
+                                  {credited > 0 && (
+                                    <>
+                                      <span>•</span>
+                                      <span
+                                        className={
+                                          blockVariance > 0
+                                            ? 'text-amber-400 font-medium'
+                                            : blockVariance < 0
+                                            ? 'text-indigo-400 font-medium'
+                                            : 'text-emerald-400 font-medium'
+                                        }
+                                      >
+                                        Variance: {blockVariance >= 0 ? '+' : ''}
+                                        {formatDuration(blockVariance)}
+                                      </span>
+                                    </>
+                                  )}
+                                </>
+                              );
+                            })()}
                           </div>
 
                           {block.notes && (
@@ -524,8 +543,16 @@ export const DailyPlannerView: React.FC = () => {
                                         {formatTimeDisplay(block.startTime, is12h)} -{' '}
                                         {formatTimeDisplay(block.endTime, is12h)}
                                       </span>
-                                      <span className="text-neutral-200 font-sans font-medium">
-                                        {formatDuration(block.plannedDuration)}
+                                      <span className="text-neutral-200 font-sans font-medium flex items-center gap-1.5">
+                                        <span>{formatDuration(block.plannedDuration)}</span>
+                                        {(() => {
+                                          const credited = blockTimeMap.get(block.id)?.creditedMinutes || block.actualDuration || 0;
+                                          return credited > 0 ? (
+                                            <span className="text-emerald-400 font-medium font-mono text-[11px]">
+                                              • {formatDuration(credited)} actual
+                                            </span>
+                                          ) : null;
+                                        })()}
                                       </span>
                                     </div>
 

@@ -27,6 +27,7 @@ import {
   calculateProductivityScore,
   calculateScheduleAdherence,
   calculateTaskCompletionRate,
+  calculateCreditedWorkingTime,
   generateDeterministicInsights,
   isHabitScheduledOnDate,
 } from '../utils/rules';
@@ -81,14 +82,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
     }
   });
 
-  // Today's tracked time sessions
-  const todaySessions = timeSessions.filter((s) => s.startTime.startsWith(selectedDate));
-  const todayTrackedMinutes = todaySessions.reduce((sum, s) => sum + s.durationMinutes, 0);
+  // Today's unified credited working time
+  const workingTimeMetrics = useMemo(() => {
+    return calculateCreditedWorkingTime(selectedDate, scheduleBlocks, timeSessions, tasks);
+  }, [selectedDate, scheduleBlocks, timeSessions, tasks]);
+
+  const blockTimeMap = useMemo(() => {
+    return new Map(workingTimeMetrics.blockBreakdown.map((b) => [b.blockId, b]));
+  }, [workingTimeMetrics]);
+
+  const todayTrackedMinutes = workingTimeMetrics.totalTrackedMinutes;
 
   // Metrics calculations
   const taskMetrics = calculateTaskCompletionRate(todayTasks);
   const habitMetrics = calculateHabitCompletionRate(habits, occurrences, selectedDate);
-  const schedMetrics = calculateScheduleAdherence(todayBlocks);
+  const schedMetrics = calculateScheduleAdherence(todayBlocks, timeSessions);
 
   // Overall Productivity Score
   const scoreResult = calculateProductivityScore(
@@ -228,13 +236,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
         <StatCard
           label="Tracked Working Time"
           value={formatDuration(todayTrackedMinutes)}
-          subValue={schedMetrics.totalPlannedMinutes > 0 ? `of ${formatDuration(schedMetrics.totalPlannedMinutes)} planned` : undefined}
+          subValue={workingTimeMetrics.totalPlannedMinutes > 0 ? `of ${formatDuration(workingTimeMetrics.totalPlannedMinutes)} planned` : undefined}
           icon={<Clock className="w-4 h-4 text-sky-400" />}
           accentColor="#0ea5e9"
           trend={
-            schedMetrics.varianceMinutes !== 0
+            workingTimeMetrics.remainingScheduledMinutes > 0
               ? {
-                  text: `${schedMetrics.varianceMinutes >= 0 ? '+' : ''}${formatDuration(schedMetrics.varianceMinutes)} variance`,
+                  text: `${formatDuration(workingTimeMetrics.remainingScheduledMinutes)} remaining`,
+                  isNeutral: true,
+                }
+              : workingTimeMetrics.varianceMinutes !== 0
+              ? {
+                  text: `${workingTimeMetrics.varianceMinutes >= 0 ? '+' : ''}${formatDuration(workingTimeMetrics.varianceMinutes)} variance`,
                   isNeutral: true,
                 }
               : { text: 'On schedule', isPositive: true }
@@ -376,15 +389,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
                             {block.startTime} – {block.endTime}
                           </span>
                           <span>•</span>
-                          <span>{formatDuration(block.plannedDuration)} planned</span>
-                          {block.actualDuration > 0 && (
-                            <>
-                              <span>•</span>
-                              <span className="text-emerald-400 font-medium">
-                                {formatDuration(block.actualDuration)} actual
-                              </span>
-                            </>
-                          )}
+                          {(() => {
+                            const credited = blockTimeMap.get(block.id)?.creditedMinutes || block.actualDuration || 0;
+                            return credited > 0 ? (
+                              <>
+                                <span>•</span>
+                                <span className="text-emerald-400 font-medium">
+                                  {formatDuration(credited)} actual
+                                </span>
+                              </>
+                            ) : null;
+                          })()}
                         </div>
                       </div>
                     </div>
