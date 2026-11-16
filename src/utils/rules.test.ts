@@ -11,8 +11,26 @@ import {
   calculateCreditedWorkingTime,
   calculatePeriodWorkingTime,
 } from './rules';
-import { checkTimeOverlap, formatDuration, timeToMinutes, minutesToTime } from './dateUtils';
+import {
+  checkTimeOverlap,
+  formatDuration,
+  timeToMinutes,
+  minutesToTime,
+  calculateScheduleDuration,
+  formatTimeDisplay,
+  formatTimeRange,
+  parseTimeTo24h,
+  timeTo12hParts,
+  partsTo24h,
+} from './dateUtils';
 import { Habit, Task, ScheduleBlock, Goal, TimeSession, GoalMilestone, HabitOccurrence } from '../types';
+import {
+  suggestCategory,
+  inferWorkingTimeEligibility,
+  extractTargetDate,
+  parseLocalInstruction,
+  WoliAIContext,
+} from '../services/woliAIEngine';
 
 test('dateUtils: time conversions and overlap check', () => {
   assert.equal(timeToMinutes('09:30'), 570);
@@ -1511,5 +1529,544 @@ test('TEST 21: Goal progress derives credited time from completed schedule block
   assert.equal(progressReset.remaining, 15);
 });
 
+// ============================================================================
+// COUNT TOWARD WORKING TIME FEATURE TESTS (TEST 1 to TEST 10)
+// ============================================================================
 
+test('TEST 1: 2-hour JavaScript task with checkbox enabled completed without timer contributes 2 hours', () => {
+  const block: ScheduleBlock = {
+    id: 'block-js',
+    title: 'JavaScript Practice',
+    date: '2026-10-30',
+    startTime: '09:00',
+    endTime: '11:00',
+    plannedDuration: 120, // 2 hours
+    actualDuration: 0,
+    status: 'completed',
+    includeInWorkingTime: true,
+    category: 'Development',
+    priority: 'high',
+    createdAt: '',
+    updatedAt: '',
+  };
 
+  const metrics = calculateCreditedWorkingTime('2026-10-30', [block], []);
+  assert.equal(metrics.totalTrackedMinutes, 120);
+  assert.equal(metrics.totalPlannedMinutes, 120);
+  assert.equal(metrics.totalScheduledMinutes, 120);
+  assert.equal(metrics.remainingScheduledMinutes, 0);
+  assert.equal(metrics.blockBreakdown[0].creditedMinutes, 120);
+  assert.equal(metrics.blockBreakdown[0].includeInWorkingTime, true);
+});
+
+test('TEST 2: 1-hour Workout activity with checkbox disabled completed contributes 0 hours to working time', () => {
+  const workoutBlock: ScheduleBlock = {
+    id: 'block-workout',
+    title: 'Workout and Gym',
+    date: '2026-10-30',
+    startTime: '07:00',
+    endTime: '08:00',
+    plannedDuration: 60, // 1 hour
+    actualDuration: 0,
+    status: 'completed',
+    includeInWorkingTime: false, // EXCLUDED
+    category: 'Fitness',
+    priority: 'medium',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const metrics = calculateCreditedWorkingTime('2026-10-30', [workoutBlock], []);
+  assert.equal(metrics.totalTrackedMinutes, 0, 'Tracked working time must be 0');
+  assert.equal(metrics.totalPlannedMinutes, 0, 'Productive planned time must be 0');
+  assert.equal(metrics.totalScheduledMinutes, 60, 'Total scheduled time still reflects full 60m');
+  assert.equal(metrics.remainingScheduledMinutes, 0);
+  assert.equal(metrics.blockBreakdown[0].creditedMinutes, 0);
+  assert.equal(metrics.blockBreakdown[0].actualSpentMinutes, 60, 'Actual spent duration is preserved');
+  assert.equal(metrics.blockBreakdown[0].includeInWorkingTime, false);
+});
+
+test('TEST 3: Combination schedule reflects 4h working time out of 7h total scheduled', () => {
+  const blocks: ScheduleBlock[] = [
+    {
+      id: 'b1',
+      title: 'JavaScript Practice',
+      date: '2026-10-30',
+      startTime: '08:00',
+      endTime: '10:00',
+      plannedDuration: 120, // 2h
+      actualDuration: 0,
+      status: 'completed',
+      includeInWorkingTime: true,
+      category: 'Coding',
+      priority: 'high',
+      createdAt: '',
+      updatedAt: '',
+    },
+    {
+      id: 'b2',
+      title: 'DSA',
+      date: '2026-10-30',
+      startTime: '10:00',
+      endTime: '11:00',
+      plannedDuration: 60, // 1h
+      actualDuration: 0,
+      status: 'completed',
+      includeInWorkingTime: true,
+      category: 'Coding',
+      priority: 'high',
+      createdAt: '',
+      updatedAt: '',
+    },
+    {
+      id: 'b3',
+      title: 'Workout',
+      date: '2026-10-30',
+      startTime: '11:00',
+      endTime: '12:00',
+      plannedDuration: 60, // 1h
+      actualDuration: 0,
+      status: 'completed',
+      includeInWorkingTime: false,
+      category: 'Health',
+      priority: 'low',
+      createdAt: '',
+      updatedAt: '',
+    },
+    {
+      id: 'b4',
+      title: 'Fresh-up',
+      date: '2026-10-30',
+      startTime: '12:00',
+      endTime: '12:30',
+      plannedDuration: 30, // 30m
+      actualDuration: 0,
+      status: 'completed',
+      includeInWorkingTime: false,
+      category: 'Personal',
+      priority: 'low',
+      createdAt: '',
+      updatedAt: '',
+    },
+    {
+      id: 'b5',
+      title: 'Lunch',
+      date: '2026-10-30',
+      startTime: '12:30',
+      endTime: '13:30',
+      plannedDuration: 60, // 1h
+      actualDuration: 0,
+      status: 'completed',
+      includeInWorkingTime: false,
+      category: 'Personal',
+      priority: 'low',
+      createdAt: '',
+      updatedAt: '',
+    },
+    {
+      id: 'b6',
+      title: 'Reading',
+      date: '2026-10-30',
+      startTime: '14:00',
+      endTime: '15:00',
+      plannedDuration: 60, // 1h
+      actualDuration: 0,
+      status: 'completed',
+      includeInWorkingTime: true,
+      category: 'Study',
+      priority: 'medium',
+      createdAt: '',
+      updatedAt: '',
+    },
+    {
+      id: 'b7',
+      title: 'Relaxation',
+      date: '2026-10-30',
+      startTime: '15:00',
+      endTime: '15:30',
+      plannedDuration: 30, // 30m
+      actualDuration: 0,
+      status: 'completed',
+      includeInWorkingTime: false,
+      category: 'Rest',
+      priority: 'low',
+      createdAt: '',
+      updatedAt: '',
+    },
+  ];
+
+  const metrics = calculateCreditedWorkingTime('2026-10-30', blocks, []);
+  // Total scheduled: 120 + 60 + 60 + 30 + 60 + 60 + 30 = 420m (7 hours)
+  assert.equal(metrics.totalScheduledMinutes, 420);
+  // Productive planned: 120 + 60 + 60 = 240m (4 hours)
+  assert.equal(metrics.totalPlannedMinutes, 240);
+  // Tracked working time: 120 + 60 + 60 = 240m (4 hours)
+  assert.equal(metrics.totalTrackedMinutes, 240);
+  assert.equal(metrics.remainingScheduledMinutes, 0);
+  assert.equal(metrics.varianceMinutes, 0); // 240 tracked - 240 planned = 0
+});
+
+test('TEST 4: Completed task with enabled checkbox toggled to disabled drops immediately to 0 hours', () => {
+  const blockEnabled: ScheduleBlock = {
+    id: 'block-task',
+    title: 'Code Refactor',
+    date: '2026-10-30',
+    startTime: '10:00',
+    endTime: '12:00',
+    plannedDuration: 120,
+    actualDuration: 0,
+    status: 'completed',
+    includeInWorkingTime: true,
+    category: 'Work',
+    priority: 'high',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const before = calculateCreditedWorkingTime('2026-10-30', [blockEnabled], []);
+  assert.equal(before.totalTrackedMinutes, 120);
+
+  // User toggles checkbox to disabled
+  const blockDisabled: ScheduleBlock = { ...blockEnabled, includeInWorkingTime: false };
+  const after = calculateCreditedWorkingTime('2026-10-30', [blockDisabled], []);
+  assert.equal(after.totalTrackedMinutes, 0);
+  assert.equal(after.totalPlannedMinutes, 0);
+  assert.equal(after.totalScheduledMinutes, 120);
+});
+
+test('TEST 5: Completed task with disabled checkbox toggled to enabled contributes 2 hours immediately', () => {
+  const blockDisabled: ScheduleBlock = {
+    id: 'block-study',
+    title: 'Algorithmic Puzzles',
+    date: '2026-10-30',
+    startTime: '14:00',
+    endTime: '16:00',
+    plannedDuration: 120,
+    actualDuration: 0,
+    status: 'completed',
+    includeInWorkingTime: false,
+    category: 'Study',
+    priority: 'high',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const before = calculateCreditedWorkingTime('2026-10-30', [blockDisabled], []);
+  assert.equal(before.totalTrackedMinutes, 0);
+
+  // User toggles checkbox to enabled
+  const blockEnabled: ScheduleBlock = { ...blockDisabled, includeInWorkingTime: true };
+  const after = calculateCreditedWorkingTime('2026-10-30', [blockEnabled], []);
+  assert.equal(after.totalTrackedMinutes, 120);
+  assert.equal(after.totalPlannedMinutes, 120);
+});
+
+test('TEST 6: Timer recorded session for task with checkbox disabled does not contribute through that activity', () => {
+  const block: ScheduleBlock = {
+    id: 'block-gym',
+    title: 'Gym Workout',
+    date: '2026-10-30',
+    startTime: '17:00',
+    endTime: '18:00',
+    plannedDuration: 60,
+    actualDuration: 45,
+    status: 'completed',
+    includeInWorkingTime: false,
+    category: 'Fitness',
+    priority: 'low',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const session: TimeSession = {
+    id: 'session-gym',
+    title: 'Gym Workout',
+    category: 'Fitness',
+    startTime: '2026-10-30T17:00:00',
+    endTime: '2026-10-30T17:45:00',
+    durationMinutes: 45,
+    linkedScheduleBlockId: 'block-gym',
+    isManual: false,
+    createdAt: '',
+  };
+
+  const metrics = calculateCreditedWorkingTime('2026-10-30', [block], [session]);
+  // Block is disabled, so credited minutes must be 0
+  assert.equal(metrics.totalTrackedMinutes, 0);
+  // Session was linked to gym block so it is not double-counted as standalone productive time
+  assert.equal(metrics.blockBreakdown[0].actualSpentMinutes, 45);
+  assert.equal(metrics.blockBreakdown[0].creditedMinutes, 0);
+  assert.equal(metrics.blockBreakdown[0].includeInWorkingTime, false);
+});
+
+test('TEST 7: Legacy records without includeInWorkingTime default to true (backward compatible)', () => {
+  const legacyBlock: ScheduleBlock = {
+    id: 'block-legacy',
+    title: 'Legacy Completed Work',
+    date: '2026-10-30',
+    startTime: '09:00',
+    endTime: '10:00',
+    plannedDuration: 60,
+    actualDuration: 0,
+    status: 'completed',
+    // includeInWorkingTime is undefined on legacy records
+    category: 'Work',
+    priority: 'medium',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const metrics = calculateCreditedWorkingTime('2026-10-30', [legacyBlock], []);
+  assert.equal(metrics.totalTrackedMinutes, 60);
+  assert.equal(metrics.totalPlannedMinutes, 60);
+  assert.equal(metrics.blockBreakdown[0].includeInWorkingTime, true);
+});
+
+test('TEST 8: Data integrity check — toggling checkbox preserves actual spent duration and status', () => {
+  const block: ScheduleBlock = {
+    id: 'block-check',
+    title: 'Deep Thinking',
+    date: '2026-10-30',
+    startTime: '11:00',
+    endTime: '12:30',
+    plannedDuration: 90,
+    actualDuration: 85,
+    status: 'completed',
+    includeInWorkingTime: true,
+    category: 'Work',
+    priority: 'high',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const before = calculateCreditedWorkingTime('2026-10-30', [block], []);
+  assert.equal(before.blockBreakdown[0].creditedMinutes, 85);
+  assert.equal(before.blockBreakdown[0].actualSpentMinutes, 85);
+
+  const toggled: ScheduleBlock = { ...block, includeInWorkingTime: false };
+  const after = calculateCreditedWorkingTime('2026-10-30', [toggled], []);
+  assert.equal(after.blockBreakdown[0].creditedMinutes, 0);
+  assert.equal(after.blockBreakdown[0].actualSpentMinutes, 85, 'Preserved actualSpentMinutes');
+  assert.equal(toggled.plannedDuration, 90, 'Planned duration intact');
+  assert.equal(toggled.status, 'completed', 'Completion status intact');
+});
+
+test('TEST 9: Schedule activity with includeInWorkingTime: false does not contribute to automatic time goals', () => {
+  const goal: Goal = {
+    id: 'goal-health',
+    title: 'Health and Fitness 10 Hours',
+    category: 'Fitness',
+    goalType: 'duration',
+    targetValue: 10,
+    currentValue: 0,
+    unit: 'hours',
+    progressMethod: 'automatic_time',
+    status: 'in_progress',
+    horizon: 'weekly',
+    priority: 'medium',
+    linkedTaskIds: [],
+    linkedCategories: ['Fitness'],
+    linkedHabitIds: [],
+    startDate: '2026-10-01',
+    targetDate: '2026-10-31',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  // Completed workout block but includeInWorkingTime: false
+  const workoutBlock: ScheduleBlock = {
+    id: 'block-gym-2',
+    title: 'Gym Workout',
+    date: '2026-10-30',
+    startTime: '08:00',
+    endTime: '10:00',
+    plannedDuration: 120, // 2 hours
+    actualDuration: 0,
+    status: 'completed',
+    includeInWorkingTime: false, // EXCLUDED from work
+    category: 'Fitness',
+    priority: 'low',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const progress = calculateGoalProgress(goal, [], [], [], [], [workoutBlock]);
+  assert.equal(progress.currentValue, 0, 'Excluded block must not contribute to goal progress');
+  assert.equal(progress.percentage, 0);
+
+  // If enabled:
+  const enabledBlock: ScheduleBlock = { ...workoutBlock, includeInWorkingTime: true };
+  const progressEnabled = calculateGoalProgress(goal, [], [], [], [], [enabledBlock]);
+  assert.equal(progressEnabled.currentValue, 2, 'Enabled block contributes 2 hours');
+  assert.equal(progressEnabled.percentage, 20);
+});
+
+test('TEST 10: Standalone timer sessions and manual entries continue to contribute normally', () => {
+  const standaloneSession: TimeSession = {
+    id: 'session-standalone',
+    title: 'Freelance Design',
+    category: 'Design',
+    startTime: '2026-10-30T14:00:00',
+    endTime: '2026-10-30T15:30:00',
+    durationMinutes: 90, // 1.5 hours
+    isManual: false,
+    createdAt: '',
+  };
+
+  const manualSession: TimeSession = {
+    id: 'session-manual',
+    title: 'Client Call',
+    category: 'Client',
+    startTime: '2026-10-30T16:00:00',
+    endTime: '2026-10-30T16:30:00',
+    durationMinutes: 30, // 0.5 hours
+    isManual: true,
+    createdAt: '',
+  };
+
+  const metrics = calculateCreditedWorkingTime('2026-10-30', [], [standaloneSession, manualSession]);
+  assert.equal(metrics.totalTrackedMinutes, 120);
+  assert.equal(metrics.standaloneSessionMinutes, 120);
+  assert.equal(metrics.totalPlannedMinutes, 0);
+  assert.equal(metrics.varianceMinutes, 120); // 120 tracked - 0 planned = +120m
+});
+
+test('24-Hour Timeline: overnight duration calculation across midnight', () => {
+  // 11:00 PM (23:00) to 01:00 AM (01:00 next day) -> 2 hours = 120 minutes
+  const overnightDuration = calculateScheduleDuration('23:00', '01:00', true);
+  assert.equal(overnightDuration, 120, '23:00 to 01:00 overnight should calculate to 120 minutes');
+
+  // 11:30 PM (23:30) to 00:30 AM (00:30 next day) -> 1 hour = 60 minutes
+  const halfHourOvernight = calculateScheduleDuration('23:30', '00:30', true);
+  assert.equal(halfHourOvernight, 60, '23:30 to 00:30 overnight should calculate to 60 minutes');
+
+  // Auto-detection when endsNextDay flag is false but endTime < startTime
+  const autoOvernight = calculateScheduleDuration('23:00', '01:00', false);
+  assert.equal(autoOvernight, 120, 'EndTime < StartTime should auto-compute overnight duration');
+
+  // Early morning daytime: 01:00 AM to 03:00 AM -> 2 hours = 120 minutes
+  const earlyMorning = calculateScheduleDuration('01:00', '03:00', false);
+  assert.equal(earlyMorning, 120, '01:00 to 03:00 should calculate to 120 minutes');
+});
+
+test('24-Hour Timeline: checkTimeOverlap handles overnight intervals seamlessly', () => {
+  // Activity A: 23:00 to 01:00 next day
+  // Activity B: 23:30 to 23:45 same day -> OVERLAPS
+  assert.equal(checkTimeOverlap('23:00', '01:00', '23:30', '23:45', true, false), true);
+
+  // Activity C: 22:30 to 23:30 -> OVERLAPS
+  assert.equal(checkTimeOverlap('23:00', '01:00', '22:30', '23:30', true, false), true);
+
+  // Activity D: 21:00 to 22:30 -> NO OVERLAP
+  assert.equal(checkTimeOverlap('23:00', '01:00', '21:00', '22:30', true, false), false);
+
+  // Activity E: 01:30 to 02:30 next day -> NO OVERLAP
+  assert.equal(checkTimeOverlap('23:00', '01:00', '01:30', '02:30', true, false), false);
+});
+
+test('Time formatting: 12h AM/PM conversion and range formatting', () => {
+  assert.equal(formatTimeDisplay('00:00', true), '12:00 AM');
+  assert.equal(formatTimeDisplay('12:00', true), '12:00 PM');
+  assert.equal(formatTimeDisplay('23:00', true), '11:00 PM');
+  assert.equal(formatTimeDisplay('01:00', true), '1:00 AM');
+  assert.equal(formatTimeDisplay('13:30', true), '1:30 PM');
+
+  // 12-hour parts and reverse
+  const parts = timeTo12hParts('23:15');
+  assert.deepEqual(parts, { hour: 11, minute: 15, period: 'PM', h12: 11, ampm: 'PM' });
+  assert.equal(partsTo24h(11, 15, 'PM'), '23:15');
+  assert.equal(partsTo24h(12, 0, 'AM'), '00:00');
+  assert.equal(partsTo24h(12, 0, 'PM'), '12:00');
+  assert.equal(partsTo24h(1, 45, 'AM'), '01:45');
+
+  // Range formatting
+  assert.equal(formatTimeRange('23:00', '01:00', true, true), '11:00 PM – 1:00 AM (+1d)');
+  assert.equal(formatTimeRange('09:00', '10:30', true, false), '9:00 AM – 10:30 AM');
+});
+
+test('Overnight completed tasks credit correctly to Tracked Working Time', () => {
+  const overnightBlock: ScheduleBlock = {
+    id: 'block-overnight-1',
+    title: 'JavaScript Practice (Overnight)',
+    date: '2026-10-31',
+    startTime: '23:00',
+    endTime: '01:00',
+    endsNextDay: true,
+    plannedDuration: 120, // 2 hours
+    actualDuration: 0,
+    status: 'completed',
+    includeInWorkingTime: true,
+    category: 'Coding',
+    priority: 'high',
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  const metrics = calculateCreditedWorkingTime('2026-10-31', [overnightBlock], []);
+  assert.equal(metrics.totalTrackedMinutes, 120, 'Completed overnight block must contribute 120 minutes');
+  assert.equal(metrics.completedPlannedMinutes, 120);
+
+  // If Count Toward Working Time is false:
+  const excludedBlock: ScheduleBlock = { ...overnightBlock, includeInWorkingTime: false };
+  const metricsExcluded = calculateCreditedWorkingTime('2026-10-31', [excludedBlock], []);
+  assert.equal(metricsExcluded.totalTrackedMinutes, 0, 'Excluded overnight block must not contribute to working time');
+  assert.equal(metricsExcluded.totalPlannedMinutes, 0);
+});
+
+test('WOLI AI Engine: natural language and Hinglish parsing', () => {
+  const dummyContext: WoliAIContext = {
+    todayDate: '2026-10-31',
+    selectedDate: '2026-10-31',
+    scheduleBlocks: [],
+    tasks: [],
+    goals: [],
+    habits: [],
+    occurrences: [],
+    timeSessions: [],
+  };
+
+  // 1. Hinglish single schedule parsing: "Kal subah 6 se 7 baje DSA"
+  const hinglishParsed = parseLocalInstruction('Kal subah 6 se 7 baje DSA padhna hai', dummyContext);
+  assert.equal(hinglishParsed.intent, 'create_schedule_blocks');
+  assert.equal(hinglishParsed.data.blocks.length, 1);
+  assert.equal(hinglishParsed.data.blocks[0].title, 'DSA padhna hai');
+  assert.equal(hinglishParsed.data.blocks[0].date, '2026-11-01'); // tomorrow
+  assert.equal(hinglishParsed.data.blocks[0].startTime, '06:00');
+  assert.equal(hinglishParsed.data.blocks[0].endTime, '07:00');
+
+  // 2. Overnight schedule parsing: "Schedule late night study from 11 PM to 1 AM"
+  const overnightParsed = parseLocalInstruction('Schedule late night study from 11 PM to 1 AM', dummyContext);
+  assert.equal(overnightParsed.intent, 'create_schedule_blocks');
+  assert.equal(overnightParsed.data.blocks[0].startTime, '23:00');
+  assert.equal(overnightParsed.data.blocks[0].endTime, '01:00');
+  assert.equal(overnightParsed.data.blocks[0].endsNextDay, true);
+
+  // 3. Working time exclusion inference
+  assert.equal(inferWorkingTimeEligibility('Workout', 'Fitness'), false);
+  assert.equal(inferWorkingTimeEligibility('Gym', 'Fitness'), false);
+  assert.equal(inferWorkingTimeEligibility('Lunch', 'Personal'), false);
+  assert.equal(inferWorkingTimeEligibility('DSA Practice', 'Coding'), true);
+  assert.equal(inferWorkingTimeEligibility('Study', 'Study'), true);
+  assert.equal(inferWorkingTimeEligibility('Coding', 'Work', "Schedule coding and don't include in working time"), false);
+
+  // 4. Multi-schedule parsing: "Tomorrow from 6 to 7 AM schedule DSA, 8 to 9 AM reading, and 2 to 4 PM coding"
+  const multiParsed = parseLocalInstruction(
+    'Tomorrow from 6 to 7 AM schedule DSA, 8 to 9 AM reading, and 2 to 4 PM coding',
+    dummyContext
+  );
+  assert.equal(multiParsed.intent, 'create_schedule_blocks');
+  assert.equal(multiParsed.data.blocks.length, 3);
+  assert.equal(multiParsed.data.blocks[0].title, 'DSA');
+  assert.equal(multiParsed.data.blocks[0].startTime, '06:00');
+  assert.equal(multiParsed.data.blocks[0].endTime, '07:00');
+  assert.equal(multiParsed.data.blocks[1].title, 'Reading');
+  assert.equal(multiParsed.data.blocks[1].startTime, '08:00');
+  assert.equal(multiParsed.data.blocks[1].endTime, '09:00');
+  assert.equal(multiParsed.data.blocks[2].title, 'Coding');
+  assert.equal(multiParsed.data.blocks[2].startTime, '14:00');
+  assert.equal(multiParsed.data.blocks[2].endTime, '16:00');
+
+  // 5. Query productivity command
+  const queryParsed = parseLocalInstruction('How much productive time did I complete today?', dummyContext);
+  assert.equal(queryParsed.intent, 'query_productivity');
+});

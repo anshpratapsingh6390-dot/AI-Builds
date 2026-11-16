@@ -4,11 +4,13 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --port=3000 --host=0.0.0.0",
+    "dev": "tsx server.ts",
+    "start": "node server.ts",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "postinstall": "node -e \"const fs = require('fs'); ['node_modules/vite/dist/client/client.mjs', 'node_modules/vite/dist/client/bundledDevClient.mjs'].forEach(f => { if (fs.existsSync(f)) { let c = fs.readFileSync(f, 'utf8'); const t = 'ws.send(JSON.stringify(data));'; const r = 'if (ws && typeof ws.send === \\\"function\\\" && ws.readyState === ws.OPEN) { ws.send(JSON.stringify(data)); }'; if (c.includes(t)) { fs.writeFileSync(f, c.replaceAll(t, r), 'utf8'); } } });\""
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

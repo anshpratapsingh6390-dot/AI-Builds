@@ -117,22 +117,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
     }
   });
 
-  // Active goals (max 3 for dashboard)
-  const activeGoals = goals
-    .filter((g) => g.status === 'in_progress')
-    .slice(0, 3);
-
   // Single source of truth live goal progress calculation
   const goalProgressMap = useMemo(() => {
     const map = new Map<string, ReturnType<typeof calculateGoalProgress>>();
     goals.forEach((g) => {
       map.set(
         g.id,
-        calculateGoalProgress(g, timeSessions, tasks, occurrences, milestones, scheduleBlocks)
+        calculateGoalProgress(g, timeSessions, tasks, occurrences, milestones, scheduleBlocks, selectedDate)
       );
     });
     return map;
-  }, [goals, timeSessions, tasks, occurrences, milestones, scheduleBlocks]);
+  }, [goals, timeSessions, tasks, occurrences, milestones, scheduleBlocks, selectedDate]);
+
+  // Active goals (max 3 for dashboard) - filter out archived and failed/completed
+  const activeGoals = useMemo(() => {
+    return goals
+      .filter((g) => {
+        if (g.isArchived || g.status === 'archived') return false;
+        const prog = goalProgressMap.get(g.id);
+        const st = prog?.status || g.status;
+        return st === 'active' || st === 'in_progress';
+      })
+      .slice(0, 3);
+  }, [goals, goalProgressMap]);
 
   // Rule-based insights
   const insights = generateDeterministicInsights({
@@ -236,7 +243,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
         <StatCard
           label="Tracked Working Time"
           value={formatDuration(todayTrackedMinutes)}
-          subValue={workingTimeMetrics.totalPlannedMinutes > 0 ? `of ${formatDuration(workingTimeMetrics.totalPlannedMinutes)} planned` : undefined}
+          subValue={
+            workingTimeMetrics.totalPlannedMinutes > 0
+              ? `of ${formatDuration(workingTimeMetrics.totalPlannedMinutes)} planned${
+                  workingTimeMetrics.totalScheduledMinutes > workingTimeMetrics.totalPlannedMinutes
+                    ? ` (${formatDuration(workingTimeMetrics.totalScheduledMinutes)} total)`
+                    : ''
+                }`
+              : workingTimeMetrics.totalScheduledMinutes > 0
+              ? `${formatDuration(workingTimeMetrics.totalScheduledMinutes)} total scheduled`
+              : undefined
+          }
           icon={<Clock className="w-4 h-4 text-sky-400" />}
           accentColor="#0ea5e9"
           trend={
@@ -371,7 +388,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
                       </button>
 
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span
                             className={`text-sm font-semibold ${
                               isCompleted ? 'line-through text-neutral-500' : 'text-neutral-100'
@@ -382,23 +399,66 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
                           <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-neutral-800 text-neutral-400">
                             {block.category}
                           </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const currentIsWork = block.includeInWorkingTime !== false;
+                              updateScheduleBlock(block.id, { includeInWorkingTime: !currentIsWork });
+                            }}
+                            className={`inline-flex items-center gap-1 text-[9px] font-semibold px-1.5 py-0.5 rounded-md border transition-all cursor-pointer ${
+                              block.includeInWorkingTime !== false
+                                ? 'bg-indigo-950/60 border-indigo-500/40 text-indigo-300 hover:bg-indigo-900/60'
+                                : 'bg-neutral-900 border-neutral-800 text-neutral-500 hover:text-neutral-300 hover:border-neutral-700'
+                            }`}
+                            title={
+                              block.includeInWorkingTime !== false
+                                ? 'Counts toward Working Time (click to exclude)'
+                                : 'Excluded from Working Time (click to include)'
+                            }
+                          >
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full ${
+                                block.includeInWorkingTime !== false ? 'bg-indigo-400' : 'bg-neutral-600'
+                              }`}
+                            />
+                            <span>
+                              {block.includeInWorkingTime !== false ? 'Work' : 'Personal'}
+                            </span>
+                          </button>
                         </div>
 
-                        <div className="flex items-center gap-3 text-xs text-neutral-400 mt-1">
+                        <div className="flex items-center gap-2 text-xs text-neutral-400 mt-1">
                           <span className="font-mono text-neutral-300">
                             {block.startTime} – {block.endTime}
                           </span>
                           <span>•</span>
+                          <span>{formatDuration(block.plannedDuration)}</span>
                           {(() => {
-                            const credited = blockTimeMap.get(block.id)?.creditedMinutes || block.actualDuration || 0;
-                            return credited > 0 ? (
-                              <>
-                                <span>•</span>
-                                <span className="text-emerald-400 font-medium">
-                                  {formatDuration(credited)} actual
-                                </span>
-                              </>
-                            ) : null;
+                            const bInfo = blockTimeMap.get(block.id);
+                            const credited = bInfo?.creditedMinutes || (block.includeInWorkingTime !== false ? block.actualDuration : 0) || 0;
+                            const spent = bInfo?.actualSpentMinutes || block.actualDuration || 0;
+                            if (credited > 0) {
+                              return (
+                                <>
+                                  <span>•</span>
+                                  <span className="text-emerald-400 font-medium font-mono text-[11px]">
+                                    {formatDuration(credited)} tracked
+                                  </span>
+                                </>
+                              );
+                            }
+                            if (block.includeInWorkingTime === false && spent > 0) {
+                              return (
+                                <>
+                                  <span>•</span>
+                                  <span className="text-neutral-400 font-medium font-mono text-[11px]">
+                                    {formatDuration(spent)} spent (off work)
+                                  </span>
+                                </>
+                              );
+                            }
+                            return null;
                           })()}
                         </div>
                       </div>

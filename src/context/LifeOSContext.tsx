@@ -75,6 +75,8 @@ interface LifeOSContextType {
   addGoal: (goal: Omit<Goal, 'id' | 'createdAt' | 'updatedAt'>) => Promise<string>;
   updateGoal: (id: string, updates: Partial<Goal>) => Promise<void>;
   deleteGoal: (id: string) => Promise<void>;
+  retryGoal: (originalGoalId: string, options: { newDeadline: string; newTargetValue?: number; newStartDate?: string; newTitle?: string; carryForwardTaskIds?: string[]; carryForwardBlockIds?: string[] }) => Promise<string>;
+  archiveGoal: (id: string) => Promise<void>;
   addMilestone: (milestone: Omit<GoalMilestone, 'id' | 'createdAt'>) => Promise<string>;
   toggleMilestone: (id: string) => Promise<void>;
   deleteMilestone: (id: string) => Promise<void>;
@@ -589,6 +591,7 @@ export const LifeOSProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const id = `block-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
     const newBlock: ScheduleBlock = {
       ...blockData,
+      includeInWorkingTime: blockData.includeInWorkingTime !== undefined ? blockData.includeInWorkingTime : false,
       id,
       createdAt: now,
       updatedAt: now,
@@ -749,6 +752,13 @@ export const LifeOSProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
     }
 
+    // Bidirectional sync: set linkedGoalId on all linked schedule blocks
+    if (Array.isArray(newGoal.linkedScheduleBlockIds) && newGoal.linkedScheduleBlockIds.length > 0) {
+      for (const blockId of newGoal.linkedScheduleBlockIds) {
+        await db.scheduleBlocks.update(blockId, { linkedGoalId: id, updatedAt: now });
+      }
+    }
+
     await refreshAll();
     return id;
   }, [refreshAll]);
@@ -789,6 +799,25 @@ export const LifeOSProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
     }
 
+    // Bidirectional sync for schedule block links if linkedScheduleBlockIds changed
+    if (updates.linkedScheduleBlockIds !== undefined) {
+      const prevBlockIds = new Set(prevGoal?.linkedScheduleBlockIds || []);
+      const nextBlockIds = new Set(updates.linkedScheduleBlockIds);
+
+      for (const prevId of prevBlockIds) {
+        if (!nextBlockIds.has(prevId)) {
+          const b = await db.scheduleBlocks.get(prevId);
+          if (b && b.linkedGoalId === id) {
+            await db.scheduleBlocks.update(prevId, { linkedGoalId: undefined, updatedAt: now });
+          }
+        }
+      }
+
+      for (const nextId of nextBlockIds) {
+        await db.scheduleBlocks.update(nextId, { linkedGoalId: id, updatedAt: now });
+      }
+    }
+
     await refreshAll();
   }, [refreshAll]);
 
@@ -799,9 +828,89 @@ export const LifeOSProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     for (const t of linkedTasks) {
       await db.tasks.update(t.id, { linkedGoalId: undefined, updatedAt: now });
     }
+    // Unlink schedule blocks that pointed to this goal
+    const linkedBlocks = await db.scheduleBlocks.where('linkedGoalId').equals(id).toArray();
+    for (const b of linkedBlocks) {
+      await db.scheduleBlocks.update(b.id, { linkedGoalId: undefined, updatedAt: now });
+    }
     await db.goals.delete(id);
     // Delete attached milestones
     await db.goalMilestones.where('goalId').equals(id).delete();
+    await refreshAll();
+  }, [refreshAll]);
+
+  const retryGoal = useCallback(async (
+    originalGoalId: string,
+    options: {
+      newDeadline: string;
+      newTargetValue?: number;
+      newStartDate?: string;
+      newTitle?: string;
+      carryForwardTaskIds?: string[];
+      carryForwardBlockIds?: string[];
+    }
+  ) => {
+    const original = await db.goals.get(originalGoalId);
+    if (!original) throw new Error('Goal not found');
+
+    const now = new Date().toISOString();
+    const today = getTodayDateString();
+    const newId = `goal-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+
+    // 1. Mark original goal as failed and record retry reference
+    await db.goals.update(originalGoalId, {
+      status: 'failed',
+      failedAt: original.failedAt || today,
+      retryGoalId: newId,
+      updatedAt: now,
+    });
+
+    // 2. Create the new goal attempt
+    const newGoal: Goal = {
+      id: newId,
+      title: options.newTitle || `${original.title} (Retry)`,
+      description: original.description,
+      category: original.category,
+      horizon: original.horizon,
+      startDate: options.newStartDate || today,
+      targetDate: options.newDeadline,
+      priority: original.priority,
+      goalType: original.goalType,
+      targetValue: options.newTargetValue !== undefined ? options.newTargetValue : original.targetValue,
+      currentValue: 0,
+      unit: original.unit,
+      progressMethod: original.progressMethod,
+      parentGoalId: original.parentGoalId,
+      linkedCategories: [...(original.linkedCategories || [])],
+      linkedHabitIds: [...(original.linkedHabitIds || [])],
+      linkedTaskIds: options.carryForwardTaskIds ? [...options.carryForwardTaskIds] : [...(original.linkedTaskIds || [])],
+      linkedScheduleBlockIds: options.carryForwardBlockIds ? [...options.carryForwardBlockIds] : [],
+      status: 'active',
+      retryOfGoalId: originalGoalId,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await db.goals.put(newGoal);
+
+    // Bidirectional task & block linking for new goal
+    if (newGoal.linkedTaskIds && newGoal.linkedTaskIds.length > 0) {
+      for (const tId of newGoal.linkedTaskIds) {
+        await db.tasks.update(tId, { linkedGoalId: newId, updatedAt: now });
+      }
+    }
+
+    await refreshAll();
+    return newId;
+  }, [refreshAll]);
+
+  const archiveGoal = useCallback(async (id: string) => {
+    const now = new Date().toISOString();
+    await db.goals.update(id, {
+      status: 'archived',
+      isArchived: true,
+      updatedAt: now,
+    });
     await refreshAll();
   }, [refreshAll]);
 
@@ -1015,6 +1124,8 @@ export const LifeOSProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       addGoal,
       updateGoal,
       deleteGoal,
+      retryGoal,
+      archiveGoal,
       addMilestone,
       toggleMilestone,
       deleteMilestone,
@@ -1078,6 +1189,8 @@ export const LifeOSProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       addGoal,
       updateGoal,
       deleteGoal,
+      retryGoal,
+      archiveGoal,
       addMilestone,
       toggleMilestone,
       deleteMilestone,

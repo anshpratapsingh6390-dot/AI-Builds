@@ -7,7 +7,18 @@ export type ScheduleBlockStatus = 'scheduled' | 'in_progress' | 'completed' | 's
 export type GoalHorizon = 'weekly' | 'monthly' | 'six_month' | 'yearly' | 'custom';
 export type GoalType = 'numeric' | 'duration' | 'completion' | 'consistency' | 'percentage' | 'milestone';
 export type GoalProgressMethod = 'automatic_time' | 'automatic_tasks' | 'automatic_habits' | 'milestones' | 'manual';
-export type GoalStatus = 'not_started' | 'in_progress' | 'completed' | 'behind' | 'abandoned';
+export type GoalStatus =
+  | 'upcoming'
+  | 'active'
+  | 'completed'
+  | 'failed'
+  | 'paused'
+  | 'archived'
+  | 'overdue'
+  | 'in_progress'
+  | 'not_started'
+  | 'behind'
+  | 'abandoned';
 
 export interface Task {
   id: string;
@@ -79,6 +90,9 @@ export interface ScheduleBlock {
   category: string;
   priority: Priority;
   status: ScheduleBlockStatus;
+  includeInWorkingTime?: boolean;
+  endsNextDay?: boolean; // Overnight activity that ends on the following day
+  endDate?: string; // YYYY-MM-DD for overnight completion
   linkedTaskId?: string;
   linkedHabitId?: string;
   linkedGoalId?: string;
@@ -87,6 +101,25 @@ export interface ScheduleBlock {
   recurrenceRule?: 'daily' | 'weekdays' | 'weekly';
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AIAssistantAction {
+  id: string;
+  type: string;
+  description: string;
+  success: boolean;
+  data?: any;
+  undoable?: boolean;
+  undoData?: any;
+}
+
+export interface AIAssistantMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: string;
+  actionsExecuted?: AIAssistantAction[];
+  suggestedActions?: string[];
 }
 
 export interface TimeSession {
@@ -134,7 +167,13 @@ export interface Goal {
   linkedCategories: string[];
   linkedHabitIds: string[];
   linkedTaskIds: string[];
+  linkedScheduleBlockIds?: string[];
   status: GoalStatus;
+  failedAt?: string;
+  retryOfGoalId?: string;
+  retryGoalId?: string;
+  failureReason?: string;
+  isArchived?: boolean;
   notes?: string;
   createdAt: string;
   updatedAt: string;

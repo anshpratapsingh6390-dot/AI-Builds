@@ -1,13 +1,14 @@
 import {
   Goal,
   GoalMilestone,
+  GoalStatus,
   Habit,
   HabitOccurrence,
   ScheduleBlock,
   Task,
   TimeSession,
 } from '../types';
-import { formatDateIso, parseDate, timeToMinutes } from './dateUtils';
+import { formatDateIso, parseDate, timeToMinutes, calculateScheduleDuration, getTodayDateString } from './dateUtils';
 
 /**
  * Checks if a habit is scheduled on a given date.
@@ -247,33 +248,37 @@ export interface CreditedBlockTime {
   category: string;
   plannedMinutes: number;
   actualTimerMinutes: number;
+  actualSpentMinutes: number;
   creditedMinutes: number;
+  includeInWorkingTime: boolean;
   status: ScheduleBlock['status'];
-  source: 'timer' | 'actual_recorded' | 'planned_completion' | 'none';
+  source: 'timer' | 'actual_recorded' | 'planned_completion' | 'excluded' | 'none';
 }
 
 /**
  * Unified Working Time Metrics for a single date.
  */
 export interface DayWorkingTimeMetrics {
-  totalTrackedMinutes: number;       // Total credited working time
-  totalPlannedMinutes: number;       // Planned time of all eligible schedule blocks
-  completedPlannedMinutes: number;   // Planned time of completed blocks
-  remainingScheduledMinutes: number; // Planned time of incomplete blocks
-  varianceMinutes: number;           // totalTrackedMinutes - totalPlannedMinutes
-  scheduleCreditedMinutes: number;   // Credited time coming from schedule blocks
-  standaloneSessionMinutes: number;  // Minutes coming from independent time sessions
+  totalTrackedMinutes: number;           // Total credited productive working time
+  totalPlannedMinutes: number;           // Productive planned duration (activities with includeInWorkingTime)
+  totalScheduledMinutes: number;         // Total planned duration of ALL scheduled activities (e.g. 5h)
+  completedPlannedMinutes: number;       // Productive planned time of completed blocks
+  remainingScheduledMinutes: number;     // Productive planned time of incomplete blocks
+  varianceMinutes: number;               // Productive Time Variance = totalTrackedMinutes - totalPlannedMinutes
+  scheduleCreditedMinutes: number;       // Productive credited time from schedule blocks
+  standaloneSessionMinutes: number;      // Productive minutes from independent time sessions
   blockBreakdown: CreditedBlockTime[];
   categoryBreakdown: Map<string, number>;
 }
 
 /**
  * Calculates unified credited working time for a specific date according to strict rules:
- * Rule A: Completed task without timer -> Credited = planned duration
- * Rule B: Completed task with timer -> Credited = actual timer-recorded duration
- * Rule C: Incomplete task without timer -> Credited = 0
- * Rule D: Incomplete task with timer -> Credited = actual timer-recorded duration
- * Rule E: Manually recorded / Standalone time entries -> Credited to total without double counting
+ * Rule A: Completed and selected -> Credited = planned duration (if no timer) or timer duration
+ * Rule B: Completed but not selected -> Credited = 0
+ * Rule C: Incomplete but selected -> Credited = timer duration (if used) or 0
+ * Rule D: Incomplete and not selected -> Credited = 0
+ * Rule E: Completed and selected with timer -> Credited = timer duration (no double counting)
+ * Standalone sessions and manual entries: Credited without double counting.
  */
 export function calculateCreditedWorkingTime(
   dateStr: string,
@@ -287,14 +292,17 @@ export function calculateCreditedWorkingTime(
   );
 
   // 2. Filter time sessions for dateStr
-  const daySessions = timeSessions.filter(
-    (s) => s.startTime.slice(0, 10) === dateStr
-  );
+  const daySessions = timeSessions.filter((s) => {
+    if (s.startTime && s.startTime.startsWith(dateStr)) return true;
+    if ((s as any).date && (s as any).date === dateStr) return true;
+    return false;
+  });
 
   const seenSessionIds = new Set<string>();
   const categoryBreakdown = new Map<string, number>();
 
-  let totalPlannedMinutes = 0;
+  let totalScheduledMinutes = 0;
+  let totalPlannedMinutes = 0; // Productive planned duration
   let completedPlannedMinutes = 0;
   let remainingScheduledMinutes = 0;
   let scheduleCreditedMinutes = 0;
@@ -302,53 +310,71 @@ export function calculateCreditedWorkingTime(
   const blockBreakdown: CreditedBlockTime[] = [];
 
   for (const block of dayBlocks) {
+    const isIncluded = block.includeInWorkingTime !== false; // Default true for legacy records
+
     const planned =
       block.plannedDuration ||
-      Math.max(0, timeToMinutes(block.endTime) - timeToMinutes(block.startTime));
-    totalPlannedMinutes += planned;
+      calculateScheduleDuration(block.startTime, block.endTime, block.endsNextDay);
+    
+    totalScheduledMinutes += planned;
 
-    if (block.status === 'completed') {
-      completedPlannedMinutes += planned;
-    } else {
-      remainingScheduledMinutes += planned;
+    if (isIncluded) {
+      totalPlannedMinutes += planned;
+      if (block.status === 'completed') {
+        completedPlannedMinutes += planned;
+      } else {
+        remainingScheduledMinutes += planned;
+      }
     }
 
-    // Find time sessions matching this block
+    // Find time sessions matching this block (via block id, linked task id, or matching title)
     const matchingSessions = daySessions.filter(
       (s) =>
         s.linkedScheduleBlockId === block.id ||
-        (block.linkedTaskId && s.linkedTaskId === block.linkedTaskId)
+        (block.linkedTaskId && s.linkedTaskId === block.linkedTaskId) ||
+        s.title.trim().toLowerCase() === block.title.trim().toLowerCase()
     );
 
+    // Mark sessions as seen so they are never treated as standalone sessions
     matchingSessions.forEach((s) => seenSessionIds.add(s.id));
-    const timerMins = matchingSessions.reduce((sum, s) => sum + s.durationMinutes, 0);
+    const timerMins = matchingSessions.reduce(
+      (sum, s) => sum + (s.durationMinutes ?? (s as any).duration ?? 0),
+      0
+    );
 
-    // Also consider block.actualDuration if manually entered/recorded on block
     const actualRecorded = timerMins > 0 ? timerMins : (block.actualDuration || 0);
+    const actualSpent = actualRecorded > 0 ? actualRecorded : (block.status === 'completed' ? planned : 0);
 
     let credited = 0;
     let source: CreditedBlockTime['source'] = 'none';
 
-    if (block.status === 'completed') {
-      if (actualRecorded > 0) {
-        // Rule B: Completed task with timer / actual recorded
-        credited = actualRecorded;
-        source = timerMins > 0 ? 'timer' : 'actual_recorded';
-      } else {
-        // Rule A: Completed task without timer
-        credited = planned;
-        source = 'planned_completion';
-      }
+    if (!isIncluded) {
+      // RULE B & RULE D: Excluded from working time
+      credited = 0;
+      source = 'excluded';
     } else {
-      // Incomplete block (scheduled, in_progress, skipped)
-      if (actualRecorded > 0) {
-        // Rule D: Incomplete task with timer / actual recorded
-        credited = actualRecorded;
-        source = timerMins > 0 ? 'timer' : 'actual_recorded';
+      // RULE A, C, E: Included in working time
+      if (block.status === 'completed') {
+        if (actualRecorded > 0) {
+          // Rule E: Completed with timer / actual recorded
+          credited = actualRecorded;
+          source = timerMins > 0 ? 'timer' : 'actual_recorded';
+        } else {
+          // Rule A: Completed without timer
+          credited = planned;
+          source = 'planned_completion';
+        }
       } else {
-        // Rule C: Incomplete task without timer
-        credited = 0;
-        source = 'none';
+        // Incomplete block
+        if (actualRecorded > 0) {
+          // Rule C: Incomplete with timer
+          credited = actualRecorded;
+          source = timerMins > 0 ? 'timer' : 'actual_recorded';
+        } else {
+          // Rule C: Incomplete without timer
+          credited = 0;
+          source = 'none';
+        }
       }
     }
 
@@ -364,20 +390,23 @@ export function calculateCreditedWorkingTime(
       category: block.category,
       plannedMinutes: planned,
       actualTimerMinutes: timerMins,
+      actualSpentMinutes: actualSpent,
       creditedMinutes: credited,
+      includeInWorkingTime: isIncluded,
       status: block.status,
       source,
     });
   }
 
-  // 3. Independent / Standalone time sessions (Rule E)
+  // 3. Independent / Standalone time sessions
   let standaloneSessionMinutes = 0;
   for (const s of daySessions) {
     if (!seenSessionIds.has(s.id)) {
       seenSessionIds.add(s.id);
-      standaloneSessionMinutes += s.durationMinutes;
+      const sessionMins = s.durationMinutes ?? (s as any).duration ?? 0;
+      standaloneSessionMinutes += sessionMins;
       const prevCat = categoryBreakdown.get(s.category) || 0;
-      categoryBreakdown.set(s.category, prevCat + s.durationMinutes);
+      categoryBreakdown.set(s.category, prevCat + sessionMins);
     }
   }
 
@@ -387,6 +416,7 @@ export function calculateCreditedWorkingTime(
   return {
     totalTrackedMinutes,
     totalPlannedMinutes,
+    totalScheduledMinutes,
     completedPlannedMinutes,
     remainingScheduledMinutes,
     varianceMinutes,
@@ -409,6 +439,7 @@ export function calculatePeriodWorkingTime(
 ): {
   totalTrackedMinutes: number;
   totalPlannedMinutes: number;
+  totalScheduledMinutes: number;
   varianceMinutes: number;
   categoryBreakdown: Map<string, number>;
   dayBreakdown: Map<string, DayWorkingTimeMetrics>;
@@ -417,6 +448,7 @@ export function calculatePeriodWorkingTime(
   const categoryBreakdown = new Map<string, number>();
   let totalTrackedMinutes = 0;
   let totalPlannedMinutes = 0;
+  let totalScheduledMinutes = 0;
 
   const dates = new Set<string>();
   scheduleBlocks.forEach((b) => {
@@ -436,6 +468,7 @@ export function calculatePeriodWorkingTime(
     dayBreakdown.set(d, dayMetrics);
     totalTrackedMinutes += dayMetrics.totalTrackedMinutes;
     totalPlannedMinutes += dayMetrics.totalPlannedMinutes;
+    totalScheduledMinutes += dayMetrics.totalScheduledMinutes;
 
     dayMetrics.categoryBreakdown.forEach((mins, cat) => {
       const prev = categoryBreakdown.get(cat) || 0;
@@ -446,6 +479,7 @@ export function calculatePeriodWorkingTime(
   return {
     totalTrackedMinutes,
     totalPlannedMinutes,
+    totalScheduledMinutes,
     varianceMinutes: totalTrackedMinutes - totalPlannedMinutes,
     categoryBreakdown,
     dayBreakdown,
@@ -645,6 +679,49 @@ export function calculateProductivityScore(
 }
 
 /**
+ * Evaluates goal status according to centralized rules:
+ * Rule 1 — Upcoming: If referenceDateStr < goal.startDate (and not completed) -> 'upcoming'
+ * Rule 2 — Active: If goal.startDate <= referenceDateStr <= goal.targetDate (and not completed) -> 'active'
+ * Rule 3 — Completed: If target achieved (currentValue >= targetValue) -> 'completed'.
+ *          A completed goal must remain completed even after its deadline.
+ * Rule 4 — Failed: If referenceDateStr > goal.targetDate and target not achieved -> 'failed'.
+ * Respects explicit user statuses: 'paused', 'archived'.
+ */
+export function evaluateGoalStatus(
+  goal: Goal,
+  progress: { currentValue: number; isCompleted: boolean },
+  referenceDateStr: string = getTodayDateString()
+): GoalStatus {
+  // If explicitly archived or flagged isArchived
+  if (goal.isArchived || goal.status === 'archived') {
+    return 'archived';
+  }
+
+  // Rule 3 — Completed: If target is achieved, always completed (even after deadline)
+  if (progress.isCompleted || (goal.targetValue > 0 && progress.currentValue >= goal.targetValue)) {
+    return 'completed';
+  }
+
+  // If explicitly paused by the user
+  if (goal.status === 'paused') {
+    return 'paused';
+  }
+
+  // Rule 4 — Failed: If deadline has passed and target not achieved
+  if (goal.targetDate && referenceDateStr > goal.targetDate) {
+    return 'failed';
+  }
+
+  // Rule 1 — Upcoming: If reference date is earlier than start date
+  if (goal.startDate && referenceDateStr < goal.startDate) {
+    return 'upcoming';
+  }
+
+  // Rule 2 — Active: Within date window and not yet completed
+  return 'active';
+}
+
+/**
  * Derives goal progress from linked records without duplicate counting.
  */
 export function calculateGoalProgress(
@@ -653,19 +730,29 @@ export function calculateGoalProgress(
   tasks: Task[],
   occurrences: HabitOccurrence[],
   milestones: GoalMilestone[],
-  scheduleBlocks: ScheduleBlock[] = []
+  scheduleBlocks: ScheduleBlock[] = [],
+  referenceDateStr: string = getTodayDateString()
 ): {
+  targetValue: number;
   currentValue: number;
   percentage: number;
   remaining: number;
   isCompleted: boolean;
   paceStatus: 'ahead' | 'on_track' | 'behind' | 'completed' | 'not_started';
+  status: GoalStatus;
+  daysOverdue?: number;
+  deadlineDate: string;
 } {
   let currentValue = goal.currentValue;
+  const method =
+    goal.progressMethod ||
+    (goal.goalType === 'duration' || (goal.unit && goal.unit.toLowerCase().includes('hour'))
+      ? 'automatic_time'
+      : 'manual');
 
-  switch (goal.progressMethod) {
+  switch (method) {
     case 'automatic_time': {
-      // 1. Build set of explicitly linked task IDs and habit IDs
+      // 1. Build set of explicitly linked task IDs, schedule block IDs, and habit IDs
       const explicitlyLinkedTaskIds = new Set<string>();
       if (Array.isArray(goal.linkedTaskIds)) {
         goal.linkedTaskIds.forEach((id) => explicitlyLinkedTaskIds.add(id));
@@ -673,6 +760,16 @@ export function calculateGoalProgress(
       tasks.forEach((t) => {
         if (t.linkedGoalId === goal.id) {
           explicitlyLinkedTaskIds.add(t.id);
+        }
+      });
+
+      const explicitlyLinkedBlockIds = new Set<string>();
+      if (Array.isArray(goal.linkedScheduleBlockIds)) {
+        goal.linkedScheduleBlockIds.forEach((id) => explicitlyLinkedBlockIds.add(id));
+      }
+      scheduleBlocks.forEach((b) => {
+        if (b.linkedGoalId === goal.id) {
+          explicitlyLinkedBlockIds.add(b.id);
         }
       });
 
@@ -685,12 +782,34 @@ export function calculateGoalProgress(
       const sessionMinutesByTask = new Map<string, number>();
       let totalMinutes = 0;
 
-      // Only fall back to category if no explicit tasks or habits are linked
-      const hasExplicitLinks = explicitlyLinkedTaskIds.size > 0 || explicitlyLinkedHabitIds.size > 0;
+      // Only fall back to category if no explicit tasks, blocks, or habits are linked
+      const hasExplicitLinks =
+        explicitlyLinkedTaskIds.size > 0 ||
+        explicitlyLinkedBlockIds.size > 0 ||
+        explicitlyLinkedHabitIds.size > 0;
+
+      // Identify schedule blocks excluded from working time
+      const excludedBlockIds = new Set(
+        scheduleBlocks.filter((b) => b.includeInWorkingTime === false).map((b) => b.id)
+      );
+      const excludedTaskIds = new Set(
+        scheduleBlocks
+          .filter((b) => b.includeInWorkingTime === false && b.linkedTaskId)
+          .map((b) => b.linkedTaskId as string)
+      );
 
       // 2. Sum durations from Time Sessions
       for (const s of timeSessions) {
         if (seenSessions.has(s.id)) continue;
+
+        // Skip sessions linked to schedule activities excluded from working time
+        if (
+          (s.linkedScheduleBlockId && excludedBlockIds.has(s.linkedScheduleBlockId)) ||
+          (s.linkedTaskId && excludedTaskIds.has(s.linkedTaskId))
+        ) {
+          seenSessions.add(s.id);
+          continue;
+        }
 
         // Check date window
         const sessionDate = s.startTime.slice(0, 10);
@@ -699,6 +818,7 @@ export function calculateGoalProgress(
 
         const isDirectGoal = s.linkedGoalId === goal.id;
         const isLinkedTask = Boolean(s.linkedTaskId && explicitlyLinkedTaskIds.has(s.linkedTaskId));
+        const isLinkedBlock = Boolean(s.linkedScheduleBlockId && explicitlyLinkedBlockIds.has(s.linkedScheduleBlockId));
         const isLinkedHabit = Boolean(s.linkedHabitId && explicitlyLinkedHabitIds.has(s.linkedHabitId));
         const isAssignedToOtherGoal = Boolean(s.linkedGoalId && s.linkedGoalId !== goal.id);
         const isCategoryMatch = !isAssignedToOtherGoal && Boolean(
@@ -706,7 +826,7 @@ export function calculateGoalProgress(
           (!hasExplicitLinks && goal.category && s.category === goal.category)
         );
 
-        if (isDirectGoal || isLinkedTask || isLinkedHabit || isCategoryMatch) {
+        if (isDirectGoal || isLinkedTask || isLinkedBlock || isLinkedHabit || isCategoryMatch) {
           seenSessions.add(s.id);
           totalMinutes += s.durationMinutes;
 
@@ -722,6 +842,7 @@ export function calculateGoalProgress(
       // 3. Process explicit Tasks' recorded actual duration or completion planned duration without double counting
       for (const t of tasks) {
         if (!explicitlyLinkedTaskIds.has(t.id)) continue;
+        if (excludedTaskIds.has(t.id)) continue;
 
         const sessionMins = sessionMinutesByTask.get(t.id) || 0;
         let taskCredited = t.actualDuration || 0;
@@ -736,14 +857,21 @@ export function calculateGoalProgress(
 
       // 4. Process schedule blocks linked to goal, linked tasks, or matching goal title
       for (const b of scheduleBlocks) {
+        if (b.includeInWorkingTime === false) continue; // Excluded from working time!
+
         if (goal.startDate && b.date && b.date < goal.startDate) continue;
         if (goal.targetDate && b.date && b.date > goal.targetDate) continue;
 
-        const isBlockDirectGoal = b.linkedGoalId === goal.id;
+        const isBlockDirectGoal = b.linkedGoalId === goal.id || explicitlyLinkedBlockIds.has(b.id);
         const isBlockLinkedTask = Boolean(b.linkedTaskId && explicitlyLinkedTaskIds.has(b.linkedTaskId));
         const isBlockTitleMatch = !hasExplicitLinks && b.title.trim().toLowerCase() === goal.title.trim().toLowerCase();
+        const isAssignedToOtherGoal = Boolean(b.linkedGoalId && b.linkedGoalId !== goal.id);
+        const isBlockCategoryMatch = !isAssignedToOtherGoal && Boolean(
+          (goal.linkedCategories && goal.linkedCategories.length > 0 && goal.linkedCategories.includes(b.category)) ||
+          (!hasExplicitLinks && goal.category && b.category === goal.category)
+        );
 
-        if (isBlockDirectGoal || isBlockLinkedTask || isBlockTitleMatch) {
+        if (isBlockDirectGoal || isBlockLinkedTask || isBlockTitleMatch || isBlockCategoryMatch) {
           const matchingSessions = timeSessions.filter(
             (s) =>
               (s.linkedScheduleBlockId === b.id || (b.linkedTaskId && s.linkedTaskId === b.linkedTaskId)) &&
@@ -751,7 +879,9 @@ export function calculateGoalProgress(
           );
           const blockSessionMins = matchingSessions.reduce((sum, s) => sum + s.durationMinutes, 0);
 
-          const planned = b.plannedDuration || Math.max(0, timeToMinutes(b.endTime) - timeToMinutes(b.startTime));
+          const planned =
+            b.plannedDuration ||
+            calculateScheduleDuration(b.startTime, b.endTime, b.endsNextDay);
           const actualWorked = blockSessionMins > 0 ? blockSessionMins : (b.actualDuration || 0);
 
           let blockCredited = 0;
@@ -878,12 +1008,272 @@ export function calculateGoalProgress(
     }
   }
 
+  // Evaluate intelligent goal status
+  const evaluatedStatus = evaluateGoalStatus(
+    goal,
+    { currentValue, isCompleted },
+    referenceDateStr
+  );
+
+  let daysOverdue: number | undefined;
+  if (evaluatedStatus === 'failed' && goal.targetDate && referenceDateStr > goal.targetDate) {
+    const dTarget = parseDate(goal.targetDate).getTime();
+    const dRef = parseDate(referenceDateStr).getTime();
+    daysOverdue = Math.max(1, Math.round((dRef - dTarget) / (1000 * 60 * 60 * 24)));
+  }
+
   return {
+    targetValue: goal.targetValue || 1,
     currentValue,
     percentage,
     remaining,
     isCompleted,
     paceStatus,
+    status: evaluatedStatus,
+    daysOverdue,
+    deadlineDate: goal.targetDate,
+  };
+}
+
+export interface GoalFailureAnalysis {
+  goalId: string;
+  goalTitle: string;
+  targetValue: number;
+  currentValue: number;
+  achievedValue?: number;
+  remaining: number;
+  deficit?: number;
+  percentage: number;
+  completionRate?: number;
+  unit: string;
+  startDate: string;
+  targetDate: string;
+  daysDuration: number;
+  totalActivitiesLinked: number;
+  completedActivitiesCount: number;
+  incompleteActivitiesCount: number;
+  totalPlannedMinutes: number;
+  totalActualMinutes: number;
+  activeWorkDaysCount: number;
+  firstActivityDate?: string;
+  lastActivityDate?: string;
+  startedLate: boolean;
+  underScheduled: boolean;
+  executionDeficit: boolean;
+  summary?: string;
+  observations: string[];
+  incompleteActivities: {
+    id: string;
+    title: string;
+    type: 'task' | 'schedule';
+    date?: string;
+    plannedMinutes: number;
+    actualMinutes: number;
+    status: string;
+  }[];
+  uncompletedActivities?: {
+    id: string;
+    title: string;
+    type: 'task' | 'schedule';
+    date?: string;
+    plannedMinutes: number;
+    actualMinutes: number;
+    status: string;
+  }[];
+  isInsufficientData: boolean;
+}
+
+/**
+ * Generates factual failure analysis based strictly on available application data.
+ */
+export function analyzeGoalFailure(
+  goal: Goal,
+  progress: { currentValue: number; percentage: number; remaining: number; isCompleted: boolean },
+  scheduleBlocks: ScheduleBlock[] = [],
+  tasks: Task[] = [],
+  timeSessions: TimeSession[] = []
+): GoalFailureAnalysis {
+  const explicitlyLinkedTaskIds = new Set(goal.linkedTaskIds || []);
+  tasks.forEach((t) => {
+    if (t.linkedGoalId === goal.id) explicitlyLinkedTaskIds.add(t.id);
+  });
+
+  const explicitlyLinkedBlockIds = new Set(goal.linkedScheduleBlockIds || []);
+  scheduleBlocks.forEach((b) => {
+    if (b.linkedGoalId === goal.id) explicitlyLinkedBlockIds.add(b.id);
+  });
+
+  const linkedTasks = tasks.filter((t) => explicitlyLinkedTaskIds.has(t.id));
+  const linkedBlocks = scheduleBlocks.filter(
+    (b) => explicitlyLinkedBlockIds.has(b.id) && b.includeInWorkingTime !== false
+  );
+  const relevantSessions = timeSessions.filter(
+    (s) =>
+      s.linkedGoalId === goal.id ||
+      (s.linkedTaskId && explicitlyLinkedTaskIds.has(s.linkedTaskId)) ||
+      (s.linkedScheduleBlockId && explicitlyLinkedBlockIds.has(s.linkedScheduleBlockId))
+  );
+
+  const totalActivitiesLinked = linkedTasks.length + linkedBlocks.length;
+  const completedTasks = linkedTasks.filter((t) => t.status === 'completed');
+  const completedBlocks = linkedBlocks.filter((b) => b.status === 'completed');
+  const completedActivitiesCount = completedTasks.length + completedBlocks.length;
+  const incompleteActivitiesCount = totalActivitiesLinked - completedActivitiesCount;
+
+  let totalPlannedMinutes = 0;
+  let totalActualMinutes = 0;
+  const workDates = new Set<string>();
+
+  linkedTasks.forEach((t) => {
+    totalPlannedMinutes += t.estimatedDuration || 0;
+    totalActualMinutes += t.actualDuration || 0;
+    if (t.dueDate) workDates.add(t.dueDate);
+  });
+
+  linkedBlocks.forEach((b) => {
+    const planned = b.plannedDuration || calculateScheduleDuration(b.startTime, b.endTime, b.endsNextDay);
+    totalPlannedMinutes += planned;
+    const actual = b.actualDuration || 0;
+    totalActualMinutes += actual;
+    if (b.date) workDates.add(b.date);
+  });
+
+  relevantSessions.forEach((s) => {
+    const d = s.startTime.slice(0, 10);
+    workDates.add(d);
+    totalActualMinutes += s.durationMinutes || 0;
+  });
+
+  const incompleteActivities: GoalFailureAnalysis['incompleteActivities'] = [];
+  linkedTasks
+    .filter((t) => t.status !== 'completed')
+    .forEach((t) => {
+      incompleteActivities.push({
+        id: t.id,
+        title: t.title,
+        type: 'task',
+        date: t.dueDate,
+        plannedMinutes: t.estimatedDuration || 0,
+        actualMinutes: t.actualDuration || 0,
+        status: t.status,
+      });
+    });
+
+  linkedBlocks
+    .filter((b) => b.status !== 'completed')
+    .forEach((b) => {
+      incompleteActivities.push({
+        id: b.id,
+        title: b.title,
+        type: 'schedule',
+        date: b.date,
+        plannedMinutes: b.plannedDuration || 0,
+        actualMinutes: b.actualDuration || 0,
+        status: b.status,
+      });
+    });
+
+  const startD = goal.startDate ? parseDate(goal.startDate) : new Date();
+  const endD = goal.targetDate ? parseDate(goal.targetDate) : new Date();
+  const daysDuration = Math.max(1, Math.round((endD.getTime() - startD.getTime()) / (1000 * 60 * 60 * 24)));
+
+  const sortedDates = Array.from(workDates).sort();
+  const firstActivityDate = sortedDates[0];
+  const lastActivityDate = sortedDates[sortedDates.length - 1];
+
+  let startedLate = false;
+  if (firstActivityDate && goal.startDate) {
+    const firstD = parseDate(firstActivityDate);
+    const daysToFirst = (firstD.getTime() - startD.getTime()) / (1000 * 60 * 60 * 24);
+    if (daysToFirst > Math.max(3, daysDuration * 0.4)) {
+      startedLate = true;
+    }
+  }
+
+  const targetMinutes = goal.targetValue * (goal.unit?.toLowerCase().includes('hour') ? 60 : 1);
+  const underScheduled = goal.progressMethod === 'automatic_time' && totalPlannedMinutes < targetMinutes;
+  const executionDeficit = totalActualMinutes < totalPlannedMinutes && totalPlannedMinutes > 0;
+
+  const observations: string[] = [];
+  const isInsufficientData = totalActivitiesLinked === 0 && relevantSessions.length === 0 && progress.currentValue === 0;
+
+  if (isInsufficientData) {
+    observations.push('Insufficient historical data to identify the reason for failure.');
+  } else {
+    observations.push(
+      `You achieved only ${progress.percentage.toFixed(1)}% of your target (${progress.currentValue} ${goal.unit} of ${goal.targetValue} ${goal.unit} target).`
+    );
+
+    if (progress.remaining > 0) {
+      observations.push(`Target remaining: ${progress.remaining} ${goal.unit} missed before the deadline.`);
+    }
+
+    if (underScheduled) {
+      const scheduledH = (totalPlannedMinutes / 60).toFixed(1);
+      observations.push(
+        `Insufficient scheduled productive hours: You planned ${scheduledH}h of activities, lower than the ${goal.targetValue}h target.`
+      );
+    }
+
+    if (executionDeficit) {
+      const planH = (totalPlannedMinutes / 60).toFixed(1);
+      const actH = (totalActualMinutes / 60).toFixed(1);
+      observations.push(
+        `Recorded productive time was lower than planned: Planned ${planH}h but recorded ${actH}h of actual productive time.`
+      );
+    }
+
+    if (incompleteActivitiesCount > 0) {
+      observations.push(
+        `${incompleteActivitiesCount} of ${totalActivitiesLinked} linked activities remained incomplete when deadline passed.`
+      );
+    }
+
+    if (startedLate && firstActivityDate) {
+      observations.push(
+        `Late start: First recorded activity was on ${firstActivityDate}, significantly after the start date (${goal.startDate}).`
+      );
+    }
+
+    if (sortedDates.length > 0) {
+      observations.push(
+        `Consistency: Productive activity was recorded on ${sortedDates.length} day(s) during the ${daysDuration}-day goal window.`
+      );
+    }
+  }
+
+  return {
+    goalId: goal.id,
+    goalTitle: goal.title,
+    targetValue: goal.targetValue,
+    currentValue: progress.currentValue,
+    remaining: progress.remaining,
+    percentage: progress.percentage,
+    unit: goal.unit,
+    startDate: goal.startDate,
+    targetDate: goal.targetDate,
+    daysDuration,
+    achievedValue: progress.currentValue,
+    deficit: progress.remaining,
+    completionRate: progress.percentage,
+    totalActivitiesLinked,
+    completedActivitiesCount,
+    incompleteActivitiesCount,
+    totalPlannedMinutes,
+    totalActualMinutes,
+    activeWorkDaysCount: sortedDates.length,
+    firstActivityDate,
+    lastActivityDate,
+    startedLate,
+    underScheduled,
+    executionDeficit,
+    summary: isInsufficientData
+      ? 'Insufficient historical data to identify the reason for failure.'
+      : observations[0] || '',
+    observations,
+    incompleteActivities,
+    uncompletedActivities: incompleteActivities,
+    isInsufficientData,
   };
 }
 

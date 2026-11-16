@@ -27,7 +27,8 @@ export type ViewType =
   | 'calendar'
   | 'analytics'
   | 'history'
-  | 'settings';
+  | 'settings'
+  | 'assistant';
 
 interface AppSidebarProps {
   currentView: ViewType;
@@ -61,6 +62,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
 
   const navItems: NavItem[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'assistant', label: 'WOLI AI', icon: Sparkles, badge: 'AI', badgeColor: 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/40' },
     { id: 'planner', label: 'Daily Planner', icon: CalendarDays },
     { id: 'tasks', label: 'Tasks', icon: CheckSquare, badge: overdueCount > 0 ? overdueCount : undefined, badgeColor: 'bg-rose-500/20 text-rose-400 border border-rose-500/30' },
     { id: 'habits', label: 'Habits', icon: Repeat },

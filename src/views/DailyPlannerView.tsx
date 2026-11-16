@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   CalendarDays,
   Plus,
@@ -15,16 +15,25 @@ import {
   AlertCircle,
   HelpCircle,
   ArrowRight,
+  Sun,
+  Moon,
+  Compass,
 } from 'lucide-react';
 import { useLifeOS } from '../context/LifeOSContext';
 import { ScheduleBlock, Priority } from '../types';
 import {
+  addDays,
+  calculateScheduleDuration,
   checkTimeOverlap,
+  formatDateIso,
   formatDuration,
   formatTimeDisplay,
+  formatTimeRange,
   getTodayDateString,
   minutesToTime,
   parseDate,
+  partsTo24h,
+  timeTo12hParts,
   timeToMinutes,
 } from '../utils/dateUtils';
 import { calculateCreditedWorkingTime, CreditedBlockTime } from '../utils/rules';
@@ -48,6 +57,7 @@ export const DailyPlannerView: React.FC = () => {
   } = useLifeOS();
 
   const [viewMode, setViewMode] = useState<'timeline' | 'agenda'>('timeline');
+  const [is12h, setIs12h] = useState(settings.timeFormat === '12h');
   const [isAddingBlock, setIsAddingBlock] = useState(false);
   const [editingBlock, setEditingBlock] = useState<ScheduleBlock | null>(null);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
@@ -60,6 +70,8 @@ export const DailyPlannerView: React.FC = () => {
   const [endTime, setEndTime] = useState('10:00');
   const [category, setCategory] = useState(categories[0]?.name || 'Work');
   const [priority, setPriority] = useState<Priority>('medium');
+  const [includeInWorkingTime, setIncludeInWorkingTime] = useState(false);
+  const [endsNextDay, setEndsNextDay] = useState(false);
   const [linkedTaskId, setLinkedTaskId] = useState('');
   const [actualDurationManual, setActualDurationManual] = useState(0);
   const [delayReason, setDelayReason] = useState('');
@@ -78,42 +90,59 @@ export const DailyPlannerView: React.FC = () => {
       (!t.scheduleBlockId || !scheduleBlocks.some((b) => b.id === t.scheduleBlockId))
   );
 
-  const dayStartHour = settings.dayStartHour ?? 6;
-  const dayEndHour = settings.dayEndHour ?? 23;
-  const is12h = settings.timeFormat === '12h';
+  // Full 24-hour timeline slots (00:00 - 23:00 / 12:00 AM - 11:00 PM)
+  const hours = useMemo(() => Array.from({ length: 24 }, (_, i) => i), []);
 
-  // Hours array for timeline slots
-  const hours = Array.from(
-    { length: dayEndHour - dayStartHour + 1 },
-    (_, i) => dayStartHour + i
-  );
-
-  const checkOverlap = (sTime: string, eTime: string, excludeId?: string) => {
-    if (timeToMinutes(eTime) <= timeToMinutes(sTime)) {
-      return 'End time must be after start time.';
+  const checkOverlap = (sTime: string, eTime: string, isNextDay = false, excludeId?: string) => {
+    if (!isNextDay && timeToMinutes(eTime) <= timeToMinutes(sTime)) {
+      return 'End time is earlier than start time. Enable "Ends next day" for overnight activities.';
     }
     const conflicts = dayBlocks.filter(
-      (b) => b.id !== excludeId && b.status !== 'cancelled' && checkTimeOverlap(sTime, eTime, b.startTime, b.endTime)
+      (b) =>
+        b.id !== excludeId &&
+        b.status !== 'cancelled' &&
+        checkTimeOverlap(sTime, eTime, b.startTime, b.endTime, isNextDay, b.endsNextDay)
     );
     if (conflicts.length > 0) {
-      return `Warning: Conflicts with "${conflicts[0].title}" (${conflicts[0].startTime} - ${conflicts[0].endTime})`;
+      return `Warning: Conflicts with "${conflicts[0].title}" (${formatTimeRange(conflicts[0].startTime, conflicts[0].endTime, is12h, conflicts[0].endsNextDay)})`;
     }
     return null;
   };
 
+  const scrollToHour = (h: number) => {
+    const el = document.getElementById(`timeline-hour-${h}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
+
+  // Auto-scroll to current hour when viewing today on initial mount / date change
+  useEffect(() => {
+    if (selectedDate === getTodayDateString() && viewMode === 'timeline') {
+      const currentHour = new Date().getHours();
+      const timer = setTimeout(() => {
+        scrollToHour(currentHour);
+      }, 200);
+      return () => clearTimeout(timer);
+    }
+  }, [selectedDate, viewMode]);
+
   const handleOpenAdd = (defaultStart?: string) => {
     setEditingBlock(null);
     const start = defaultStart || '09:00';
-    const end = minutesToTime(timeToMinutes(start) + (settings.defaultTaskDuration || 60));
+    const end = minutesToTime((timeToMinutes(start) + (settings.defaultTaskDuration || 60)) % (24 * 60));
+    const isAutoNext = timeToMinutes(end) < timeToMinutes(start);
     setTitle('');
     setStartTime(start);
     setEndTime(end);
     setCategory(categories[0]?.name || 'Work');
     setPriority('medium');
+    setIncludeInWorkingTime(false); // Unchecked by default for newly created schedule blocks
+    setEndsNextDay(isAutoNext);
     setLinkedTaskId('');
     setActualDurationManual(0);
     setDelayReason('');
-    setOverlapWarning(checkOverlap(start, end));
+    setOverlapWarning(checkOverlap(start, end, isAutoNext));
     setIsAddingBlock(true);
   };
 
@@ -124,10 +153,13 @@ export const DailyPlannerView: React.FC = () => {
     setEndTime(block.endTime);
     setCategory(block.category);
     setPriority(block.priority);
+    setIncludeInWorkingTime(block.includeInWorkingTime !== false); // Preserves legacy records as true
+    const isOvernight = Boolean(block.endsNextDay || timeToMinutes(block.endTime) < timeToMinutes(block.startTime));
+    setEndsNextDay(isOvernight);
     setLinkedTaskId(block.linkedTaskId || '');
     setActualDurationManual(block.actualDuration || 0);
     setDelayReason(block.notes || '');
-    setOverlapWarning(null);
+    setOverlapWarning(checkOverlap(block.startTime, block.endTime, isOvernight, block.id));
     setIsAddingBlock(true);
   };
 
@@ -135,33 +167,31 @@ export const DailyPlannerView: React.FC = () => {
     e.preventDefault();
     if (!title.trim()) return;
 
-    const plannedDuration = Math.max(15, timeToMinutes(endTime) - timeToMinutes(startTime));
+    const isOvernight = Boolean(endsNextDay || timeToMinutes(endTime) < timeToMinutes(startTime));
+    const plannedDuration = calculateScheduleDuration(startTime, endTime, isOvernight);
+
+    const blockData = {
+      title: title.trim(),
+      startTime,
+      endTime,
+      plannedDuration,
+      actualDuration: Number(actualDurationManual) || 0,
+      category,
+      priority,
+      includeInWorkingTime,
+      endsNextDay: isOvernight,
+      endDate: isOvernight ? formatDateIso(addDays(parseDate(selectedDate), 1)) : undefined,
+      linkedTaskId: linkedTaskId || undefined,
+      notes: delayReason.trim(),
+    };
 
     if (editingBlock) {
-      await updateScheduleBlock(editingBlock.id, {
-        title: title.trim(),
-        startTime,
-        endTime,
-        plannedDuration,
-        actualDuration: Number(actualDurationManual) || 0,
-        category,
-        priority,
-        linkedTaskId: linkedTaskId || undefined,
-        notes: delayReason.trim(),
-      });
+      await updateScheduleBlock(editingBlock.id, blockData);
     } else {
       await addScheduleBlock({
-        title: title.trim(),
+        ...blockData,
         date: selectedDate,
-        startTime,
-        endTime,
-        plannedDuration,
-        actualDuration: Number(actualDurationManual) || 0,
-        category,
-        priority,
         status: 'scheduled',
-        linkedTaskId: linkedTaskId || undefined,
-        notes: delayReason.trim(),
       });
     }
 
@@ -249,6 +279,30 @@ export const DailyPlannerView: React.FC = () => {
               }`}
             >
               Agenda
+            </button>
+          </div>
+
+          {/* 12h (AM/PM) vs 24h format toggle */}
+          <div className="flex items-center bg-neutral-900 border border-neutral-800 rounded-xl p-1 text-xs" title="Toggle time format">
+            <button
+              onClick={() => setIs12h(true)}
+              className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                is12h
+                  ? 'bg-indigo-600 text-white font-semibold'
+                  : 'text-neutral-400 hover:text-white'
+              }`}
+            >
+              12h (AM/PM)
+            </button>
+            <button
+              onClick={() => setIs12h(false)}
+              className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                !is12h
+                  ? 'bg-indigo-600 text-white font-semibold'
+                  : 'text-neutral-400 hover:text-white'
+              }`}
+            >
+              24h
             </button>
           </div>
 
@@ -355,7 +409,7 @@ export const DailyPlannerView: React.FC = () => {
                         </button>
 
                         <div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <span
                               className={`text-sm font-bold ${
                                 isDone ? 'line-through text-neutral-500' : 'text-neutral-100'
@@ -366,13 +420,46 @@ export const DailyPlannerView: React.FC = () => {
                             <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-neutral-800 text-neutral-300">
                               {block.category}
                             </span>
+
+                            {/* Quick Count Toward Working Time Toggle */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const currentIsWork = block.includeInWorkingTime !== false;
+                                updateScheduleBlock(block.id, { includeInWorkingTime: !currentIsWork });
+                              }}
+                              className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-md border transition-all cursor-pointer ${
+                                block.includeInWorkingTime !== false
+                                  ? 'bg-indigo-950/60 border-indigo-500/40 text-indigo-300 hover:bg-indigo-900/60'
+                                  : 'bg-neutral-900 border-neutral-800 text-neutral-500 hover:text-neutral-300 hover:border-neutral-700'
+                              }`}
+                              title={
+                                block.includeInWorkingTime !== false
+                                  ? 'Counts toward Working Time (click to exclude)'
+                                  : 'Excluded from Working Time (click to include)'
+                              }
+                            >
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${
+                                  block.includeInWorkingTime !== false ? 'bg-indigo-400' : 'bg-neutral-600'
+                                }`}
+                              />
+                              <span>
+                                {block.includeInWorkingTime !== false ? 'Working Time' : 'Personal / Off'}
+                              </span>
+                            </button>
                           </div>
 
                           <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-400 mt-1.5">
                             <span className="font-mono text-neutral-200">
-                              {formatTimeDisplay(block.startTime, is12h)} –{' '}
-                              {formatTimeDisplay(block.endTime, is12h)}
+                              {formatTimeRange(block.startTime, block.endTime, is12h, block.endsNextDay)}
                             </span>
+                            {block.endsNextDay && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                                🌙 +1d Overnight
+                              </span>
+                            )}
                             <span>•</span>
                             <span>Planned: {formatDuration(block.plannedDuration)}</span>
                             {(() => {
@@ -463,6 +550,33 @@ export const DailyPlannerView: React.FC = () => {
           ) : (
             /* Timeline View */
             <div className="relative rounded-2xl bg-neutral-900/80 border border-neutral-800 p-4 overflow-x-auto">
+              {/* Quick Navigation Toolbar */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-3 mb-4 border-b border-neutral-800 text-xs">
+                <div className="flex items-center gap-2 text-neutral-400">
+                  <span className="font-semibold text-neutral-200">24-Hour Timeline</span>
+                  <span>•</span>
+                  <span>00:00 – 23:59 (Full Day)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => scrollToHour(0)}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-750 text-neutral-300 hover:text-white border border-neutral-700 transition-colors cursor-pointer"
+                    title="Scroll to start of day (12:00 AM)"
+                  >
+                    <Moon className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Start of Day (12 AM)</span>
+                  </button>
+                  <button
+                    onClick={() => scrollToHour(new Date().getHours())}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 hover:text-white border border-indigo-500/30 transition-colors cursor-pointer"
+                    title="Jump to current hour slot"
+                  >
+                    <Compass className="w-3.5 h-3.5" />
+                    <span>Jump to Current Time ({formatTimeDisplay(minutesToTime(new Date().getHours() * 60 + new Date().getMinutes()), is12h)})</span>
+                  </button>
+                </div>
+              </div>
+
               <div className="space-y-4 min-w-[500px]">
                 {hours.map((hour) => {
                   const hourStr = String(hour).padStart(2, '0') + ':00';
@@ -474,11 +588,40 @@ export const DailyPlannerView: React.FC = () => {
                     return startH === hour;
                   });
 
+                  // Time of day ambient divider
+                  let timeOfDayBanner = null;
+                  if (hour === 0) {
+                    timeOfDayBanner = (
+                      <div className="text-[10px] font-bold text-indigo-400/90 px-2 py-0.5 rounded bg-indigo-950/40 border border-indigo-900/40 inline-flex items-center gap-1 mb-1">
+                        <Moon className="w-3 h-3 text-indigo-400" /> Night (12:00 AM – 06:00 AM)
+                      </div>
+                    );
+                  } else if (hour === 6) {
+                    timeOfDayBanner = (
+                      <div className="text-[10px] font-bold text-amber-400/90 px-2 py-0.5 rounded bg-amber-950/40 border border-amber-900/40 inline-flex items-center gap-1 mb-1">
+                        <Sun className="w-3 h-3 text-amber-400" /> Morning (06:00 AM – 12:00 PM)
+                      </div>
+                    );
+                  } else if (hour === 12) {
+                    timeOfDayBanner = (
+                      <div className="text-[10px] font-bold text-sky-400/90 px-2 py-0.5 rounded bg-sky-950/40 border border-sky-900/40 inline-flex items-center gap-1 mb-1">
+                        <Sun className="w-3 h-3 text-sky-400" /> Afternoon (12:00 PM – 06:00 PM)
+                      </div>
+                    );
+                  } else if (hour === 18) {
+                    timeOfDayBanner = (
+                      <div className="text-[10px] font-bold text-purple-400/90 px-2 py-0.5 rounded bg-purple-950/40 border border-purple-900/40 inline-flex items-center gap-1 mb-1">
+                        <Moon className="w-3 h-3 text-purple-400" /> Evening & Late Night (06:00 PM – 12:00 AM)
+                      </div>
+                    );
+                  }
+
                   return (
-                    <div key={hour} className="flex items-start gap-4 group">
+                    <div key={hour} id={`timeline-hour-${hour}`} className="flex items-start gap-4 group scroll-mt-6">
                       {/* Hour label */}
                       <div className="w-16 shrink-0 text-xs font-mono font-semibold text-neutral-400 pt-1 text-right">
-                        {hourFormatted}
+                        {timeOfDayBanner}
+                        <div>{hourFormatted}</div>
                       </div>
 
                       {/* Hour Slot content */}
@@ -534,15 +677,48 @@ export const DailyPlannerView: React.FC = () => {
                                       <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-neutral-900 text-neutral-400">
                                         {block.category}
                                       </span>
+
+                                      {/* Quick Working Time Toggle */}
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          const currentIsWork = block.includeInWorkingTime !== false;
+                                          updateScheduleBlock(block.id, { includeInWorkingTime: !currentIsWork });
+                                        }}
+                                        className={`inline-flex items-center gap-1 text-[9px] font-semibold px-1.5 py-0.5 rounded-md border transition-all cursor-pointer ${
+                                          block.includeInWorkingTime !== false
+                                            ? 'bg-indigo-950/60 border-indigo-500/40 text-indigo-300 hover:bg-indigo-900/60'
+                                            : 'bg-neutral-900 border-neutral-800 text-neutral-500 hover:text-neutral-300 hover:border-neutral-700'
+                                        }`}
+                                        title={
+                                          block.includeInWorkingTime !== false
+                                            ? 'Counts toward Working Time (click to exclude)'
+                                            : 'Excluded from Working Time (click to include)'
+                                        }
+                                      >
+                                        <span
+                                          className={`w-1.5 h-1.5 rounded-full ${
+                                            block.includeInWorkingTime !== false ? 'bg-indigo-400' : 'bg-neutral-600'
+                                          }`}
+                                        />
+                                        <span>
+                                          {block.includeInWorkingTime !== false ? 'Work' : 'Personal'}
+                                        </span>
+                                      </button>
                                     </div>
                                   </div>
 
                                   <div className="flex items-center gap-3">
                                     <div className="flex items-center gap-3 text-xs font-mono text-neutral-400">
                                       <span>
-                                        {formatTimeDisplay(block.startTime, is12h)} -{' '}
-                                        {formatTimeDisplay(block.endTime, is12h)}
+                                        {formatTimeRange(block.startTime, block.endTime, is12h, block.endsNextDay)}
                                       </span>
+                                      {block.endsNextDay && (
+                                        <span className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                                          🌙 +1d
+                                        </span>
+                                      )}
                                       <span className="text-neutral-200 font-sans font-medium flex items-center gap-1.5">
                                         <span>{formatDuration(block.plannedDuration)}</span>
                                         {(() => {
@@ -685,35 +861,178 @@ export const DailyPlannerView: React.FC = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Start Time with AM/PM toggle */}
                 <div>
-                  <label className="block text-xs font-semibold text-neutral-300 mb-1">
-                    Start Time
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-neutral-300">
+                      Start Time
+                    </label>
+                    <div className="flex items-center rounded-lg bg-neutral-900 border border-neutral-800 p-0.5 text-[10px] font-mono">
+                      {(() => {
+                        const { ampm } = timeTo12hParts(startTime);
+                        return (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const { h12, minute } = timeTo12hParts(startTime);
+                                const newTime = partsTo24h(h12, minute, 'AM');
+                                setStartTime(newTime);
+                                setOverlapWarning(checkOverlap(newTime, endTime, endsNextDay, editingBlock?.id));
+                              }}
+                              className={`px-1.5 py-0.5 rounded transition-colors ${
+                                ampm === 'AM' ? 'bg-indigo-600 text-white font-bold' : 'text-neutral-400 hover:text-neutral-200'
+                              }`}
+                            >
+                              AM
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const { h12, minute } = timeTo12hParts(startTime);
+                                const newTime = partsTo24h(h12, minute, 'PM');
+                                setStartTime(newTime);
+                                setOverlapWarning(checkOverlap(newTime, endTime, endsNextDay, editingBlock?.id));
+                              }}
+                              className={`px-1.5 py-0.5 rounded transition-colors ${
+                                ampm === 'PM' ? 'bg-indigo-600 text-white font-bold' : 'text-neutral-400 hover:text-neutral-200'
+                              }`}
+                            >
+                              PM
+                            </button>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
                   <input
                     type="time"
                     value={startTime}
                     onChange={(e) => {
-                      setStartTime(e.target.value);
-                      setOverlapWarning(checkOverlap(e.target.value, endTime, editingBlock?.id));
+                      const newStart = e.target.value;
+                      setStartTime(newStart);
+                      const isAutoNext = Boolean(endsNextDay || (newStart && endTime && timeToMinutes(endTime) < timeToMinutes(newStart)));
+                      if (endTime && timeToMinutes(endTime) < timeToMinutes(newStart)) {
+                        setEndsNextDay(true);
+                      }
+                      setOverlapWarning(checkOverlap(newStart, endTime, isAutoNext, editingBlock?.id));
                     }}
-                    className="w-full px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800 text-neutral-100 text-xs"
+                    className="w-full px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800 text-neutral-100 text-xs focus:outline-none focus:border-indigo-500 font-mono"
                   />
+                  <div className="text-[11px] text-neutral-400 mt-1 font-mono">
+                    12h: {formatTimeDisplay(startTime, true)}
+                  </div>
                 </div>
 
+                {/* End Time with AM/PM toggle */}
                 <div>
-                  <label className="block text-xs font-semibold text-neutral-300 mb-1">
-                    End Time
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-neutral-300">
+                      End Time
+                    </label>
+                    <div className="flex items-center rounded-lg bg-neutral-900 border border-neutral-800 p-0.5 text-[10px] font-mono">
+                      {(() => {
+                        const { ampm } = timeTo12hParts(endTime);
+                        return (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const { h12, minute } = timeTo12hParts(endTime);
+                                const newTime = partsTo24h(h12, minute, 'AM');
+                                setEndTime(newTime);
+                                const isAutoNext = Boolean(endsNextDay || (startTime && newTime && timeToMinutes(newTime) < timeToMinutes(startTime)));
+                                if (startTime && timeToMinutes(newTime) < timeToMinutes(startTime)) {
+                                  setEndsNextDay(true);
+                                }
+                                setOverlapWarning(checkOverlap(startTime, newTime, isAutoNext, editingBlock?.id));
+                              }}
+                              className={`px-1.5 py-0.5 rounded transition-colors ${
+                                ampm === 'AM' ? 'bg-indigo-600 text-white font-bold' : 'text-neutral-400 hover:text-neutral-200'
+                              }`}
+                            >
+                              AM
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const { h12, minute } = timeTo12hParts(endTime);
+                                const newTime = partsTo24h(h12, minute, 'PM');
+                                setEndTime(newTime);
+                                const isAutoNext = Boolean(endsNextDay || (startTime && newTime && timeToMinutes(newTime) < timeToMinutes(startTime)));
+                                setOverlapWarning(checkOverlap(startTime, newTime, isAutoNext, editingBlock?.id));
+                              }}
+                              className={`px-1.5 py-0.5 rounded transition-colors ${
+                                ampm === 'PM' ? 'bg-indigo-600 text-white font-bold' : 'text-neutral-400 hover:text-neutral-200'
+                              }`}
+                            >
+                              PM
+                            </button>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
                   <input
                     type="time"
                     value={endTime}
                     onChange={(e) => {
-                      setEndTime(e.target.value);
-                      setOverlapWarning(checkOverlap(startTime, e.target.value, editingBlock?.id));
+                      const newEnd = e.target.value;
+                      setEndTime(newEnd);
+                      const isAutoNext = Boolean(endsNextDay || (startTime && newEnd && timeToMinutes(newEnd) < timeToMinutes(startTime)));
+                      if (startTime && timeToMinutes(newEnd) < timeToMinutes(startTime)) {
+                        setEndsNextDay(true);
+                      }
+                      setOverlapWarning(checkOverlap(startTime, newEnd, isAutoNext, editingBlock?.id));
                     }}
-                    className="w-full px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800 text-neutral-100 text-xs"
+                    className="w-full px-3 py-2 rounded-xl bg-neutral-950 border border-neutral-800 text-neutral-100 text-xs focus:outline-none focus:border-indigo-500 font-mono"
                   />
+                  <div className="text-[11px] text-neutral-400 mt-1 font-mono">
+                    12h: {formatTimeDisplay(endTime, true)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Overnight check and duration summary */}
+              <div className="p-3 rounded-xl bg-neutral-900/80 border border-neutral-800 space-y-2">
+                <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={endsNextDay}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setEndsNextDay(checked);
+                      setOverlapWarning(checkOverlap(startTime, endTime, checked, editingBlock?.id));
+                    }}
+                    className="w-4 h-4 rounded border-neutral-700 bg-neutral-950 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-neutral-900"
+                  />
+                  <div className="text-xs">
+                    <span className="font-semibold text-neutral-200 flex items-center gap-1.5">
+                      🌙 Crosses midnight (Ends on next day)
+                    </span>
+                    <p className="text-[11px] text-neutral-400">
+                      Supports overnight work like 11:00 PM to 01:00 AM without artificial time constraints.
+                    </p>
+                  </div>
+                </label>
+
+                <div className="pt-2 border-t border-neutral-800 flex items-center justify-between text-xs font-mono">
+                  <span className="text-neutral-400">Calculated Planned Duration:</span>
+                  <span className="text-indigo-300 font-semibold">
+                    {formatDuration(
+                      calculateScheduleDuration(
+                        startTime,
+                        endTime,
+                        endsNextDay || timeToMinutes(endTime) < timeToMinutes(startTime)
+                      )
+                    )}
+                    {(endsNextDay || timeToMinutes(endTime) < timeToMinutes(startTime)) && (
+                      <span className="text-amber-400 ml-1.5 font-sans text-[11px] font-normal">
+                        (Overnight)
+                      </span>
+                    )}
+                  </span>
                 </div>
               </div>
 
@@ -758,6 +1077,35 @@ export const DailyPlannerView: React.FC = () => {
                     <option value="low">Low</option>
                   </select>
                 </div>
+              </div>
+
+              {/* Count toward Working Time Checkbox */}
+              <div className="pt-1">
+                <label className="flex items-start gap-3 p-3 rounded-xl bg-neutral-950/80 border border-neutral-800 hover:border-neutral-700 cursor-pointer select-none transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={includeInWorkingTime}
+                    onChange={(e) => setIncludeInWorkingTime(e.target.checked)}
+                    className="w-4 h-4 mt-0.5 rounded text-indigo-600 focus:ring-indigo-500 border-neutral-700 bg-neutral-900 cursor-pointer"
+                  />
+                  <div className="flex flex-col">
+                    <span className="text-xs font-semibold text-neutral-100 flex items-center gap-1.5">
+                      <span>Count toward Working Time</span>
+                      <span
+                        className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                          includeInWorkingTime
+                            ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/30'
+                            : 'bg-neutral-800 text-neutral-400'
+                        }`}
+                      >
+                        {includeInWorkingTime ? 'Productive Work' : 'Personal / Off'}
+                      </span>
+                    </span>
+                    <span className="text-[11px] text-neutral-400 mt-0.5">
+                      When enabled, this activity's duration contributes to Tracked Working Time on your Dashboard and productive analytics.
+                    </span>
+                  </div>
+                </label>
               </div>
 
               {editingBlock && (

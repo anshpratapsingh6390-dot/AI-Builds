@@ -19,6 +19,8 @@ import { CalendarView } from './views/CalendarView';
 import { AnalyticsView } from './views/AnalyticsView';
 import { HistoryView } from './views/HistoryView';
 import { DataSettingsView } from './views/DataSettingsView';
+import { WoliAIView } from './views/WoliAIView';
+import { FloatingAIAssistant } from './components/FloatingAIAssistant';
 
 function LifeOSContent() {
   const [currentView, setCurrentView] = useState<ViewType>('dashboard');
@@ -63,8 +65,12 @@ function LifeOSContent() {
           {currentView === 'analytics' && <AnalyticsView />}
           {currentView === 'history' && <HistoryView />}
           {currentView === 'settings' && <DataSettingsView />}
+          {currentView === 'assistant' && <WoliAIView onNavigate={setCurrentView} />}
         </main>
       </div>
+
+      {/* Floating AI Assistant Button & Quick Voice Panel */}
+      <FloatingAIAssistant onOpenFullView={() => setCurrentView('assistant')} />
 
       {/* Universal Quick Add Modal */}
       <QuickAddModal />

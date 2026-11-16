@@ -59,11 +59,104 @@ export function formatDuration(minutes: number): string {
   return `${sign}${h}h ${m}m`;
 }
 
-export function checkTimeOverlap(startA: string, endA: string, startB: string, endB: string): boolean {
+/**
+ * Calculates scheduled duration in minutes, supporting overnight activities that cross midnight.
+ * e.g. 23:00 to 01:00 (endsNextDay) -> 120 minutes
+ * e.g. 23:30 to 00:30 (endsNextDay) -> 60 minutes
+ * e.g. 01:00 to 03:00 -> 120 minutes
+ */
+export function calculateScheduleDuration(startTime: string, endTime: string, endsNextDay = false): number {
+  if (!startTime || !endTime) return 0;
+  const s = timeToMinutes(startTime);
+  const e = timeToMinutes(endTime);
+  if (endsNextDay || e < s) {
+    return Math.max(1, (24 * 60 - s) + e);
+  }
+  return Math.max(1, e - s);
+}
+
+/**
+ * Formats a time range e.g. "11:00 PM – 01:00 AM (+1d)" or "23:00 – 01:00 (+1d)"
+ */
+export function formatTimeRange(startTime: string, endTime: string, is12h = false, endsNextDay = false): string {
+  const isOvernight = endsNextDay || timeToMinutes(endTime) < timeToMinutes(startTime);
+  const startFmt = formatTimeDisplay(startTime, is12h);
+  const endFmt = formatTimeDisplay(endTime, is12h);
+  return `${startFmt} – ${endFmt}${isOvernight ? ' (+1d)' : ''}`;
+}
+
+/**
+ * Splits 24h HH:MM string into 12h hour (1-12), minute (0-59), and period ('AM' | 'PM')
+ */
+export function timeTo12hParts(time24: string): { hour: number; minute: number; period: 'AM' | 'PM'; h12: number; ampm: 'AM' | 'PM' } {
+  if (!time24) return { hour: 12, minute: 0, period: 'AM', h12: 12, ampm: 'AM' };
+  const mins = timeToMinutes(time24);
+  const h24 = Math.floor(mins / 60) % 24;
+  const minute = mins % 60;
+  const period: 'AM' | 'PM' = h24 >= 12 ? 'PM' : 'AM';
+  const hour = h24 % 12 || 12;
+  return { hour, minute, period, h12: hour, ampm: period };
+}
+
+/**
+ * Converts 12h parts (hour 1-12, minute 0-59, period 'AM' | 'PM') to 24h HH:MM string
+ */
+export function partsTo24h(hour12: number, minute: number, period: 'AM' | 'PM'): string {
+  let h = hour12 % 12;
+  if (period === 'PM') h += 12;
+  return `${String(h).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+/**
+ * Parses freeform natural or 12h time strings like "6 AM", "7:30 PM", "11:00pm", "23:00", "01:00" to 24h "HH:MM".
+ */
+export function parseTimeTo24h(input: string): string | null {
+  if (!input) return null;
+  const str = input.trim().toLowerCase();
+  
+  // Matches "6:30 pm", "6:30pm", "6 pm", "6pm", "06:30 am", etc.
+  const match12 = str.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/);
+  if (match12) {
+    let h = parseInt(match12[1], 10);
+    const m = match12[2] ? parseInt(match12[2], 10) : 0;
+    const period = match12[3];
+    if (h < 1 || h > 12 || m < 0 || m > 59) return null;
+    if (period === 'pm' && h < 12) h += 12;
+    if (period === 'am' && h === 12) h = 0;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  }
+
+  // Matches 24h "14:30" or "09:00"
+  const match24 = str.match(/^(\d{1,2}):(\d{2})$/);
+  if (match24) {
+    const h = parseInt(match24[1], 10);
+    const m = parseInt(match24[2], 10);
+    if (h >= 0 && h < 24 && m >= 0 && m < 60) {
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    }
+  }
+
+  return null;
+}
+
+export function checkTimeOverlap(
+  startA: string,
+  endA: string,
+  startB: string,
+  endB: string,
+  endsNextDayA = false,
+  endsNextDayB = false
+): boolean {
   const sA = timeToMinutes(startA);
-  const eA = timeToMinutes(endA);
+  const eA_raw = timeToMinutes(endA);
+  const isOvernightA = endsNextDayA || eA_raw < sA;
+  const eA = isOvernightA ? eA_raw + 24 * 60 : eA_raw;
+
   const sB = timeToMinutes(startB);
-  const eB = timeToMinutes(endB);
+  const eB_raw = timeToMinutes(endB);
+  const isOvernightB = endsNextDayB || eB_raw < sB;
+  const eB = isOvernightB ? eB_raw + 24 * 60 : eB_raw;
+
   // Two intervals [sA, eA) and [sB, eB) overlap if max(sA, sB) < min(eA, eB)
   return Math.max(sA, sB) < Math.min(eA, eB);
 }
