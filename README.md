@@ -1,4 +1,4 @@
-# LIFE OS
+# WOLI OS STANDS FOR WORK-LIFE OPERATING SYSTEM
 
 > **Personal Productivity, Habit Tracking, Time Management & Goal Intelligence Platform**
 
